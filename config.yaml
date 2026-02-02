@@ -1,0 +1,1414 @@
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.15.12
+    framework: huggingface
+    huggingface_version: 4.34.0
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    m:
+    - '1': trainer/global_step
+      '6':
+      - 3
+    - '1': actions_loss/train
+      '5': 1
+      '6':
+      - 1
+    - '1': loss/train
+      '5': 1
+      '6':
+      - 1
+    - '1': train_steps
+      '5': 1
+      '6':
+      - 1
+    - '1': train_frames
+      '5': 1
+      '6':
+      - 1
+    - '1': current_prob_to_sample_last_steps
+      '5': 1
+      '6':
+      - 1
+    - '1': epoch
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/51635.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': actions_loss/val
+      '5': 1
+      '6':
+      - 1
+    - '1': loss/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score_weighted/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score_macro/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/m/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/r/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/l/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/b/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/end/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/sub_done/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/ls/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/rs/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/p/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/zm/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/zp/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/yp/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/ym/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/wp/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/wm/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/yms/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/zms/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/zps/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/yps/val
+      '5': 1
+      '6':
+      - 1
+    - '1': f1score/d/val
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/52000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/53411.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/54000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/55187.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/56000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/56963.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/58000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/58739.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/60000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/60515.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/62000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/62291.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/64000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/64067.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/65843.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/66000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/67619.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/68000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/69395.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/70000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/71171.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/72000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/72947.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/74000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/74723.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/76000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/76499.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/78000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/78275.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/80000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/80051.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/81827.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/82000.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/val/83603.nrows
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000._type
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000.sha256
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000.size
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000.artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000._latest_artifact_path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000.path
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000.ncols
+      '5': 1
+      '6':
+      - 1
+    - '1': video_action_table/train/84000.nrows
+      '5': 1
+      '6':
+      - 1
+    python_version: 3.9.18
+    start_time: 1699917261.680495
+    t:
+      '1':
+      - 1
+      - 5
+      - 11
+      - 41
+      - 49
+      - 53
+      - 55
+      - 63
+      '13': linux-x86_64
+      '2':
+      - 1
+      - 5
+      - 11
+      - 41
+      - 49
+      - 53
+      - 55
+      - 63
+      '3':
+      - 7
+      - 13
+      - 16
+      - 23
+      '4': 3.9.18
+      '5': 0.15.12
+      '6': 4.34.0
+      '8':
+      - 5
+data_dir:
+  desc: null
+  value: /net/nfs.cirrascale/prior/datasets/vida_datasets/four_task_all_type
+dataset_version:
+  desc: null
+  value: ABLATION_FOUR_TASKS
+eval_every:
+  desc: null
+  value: 1000
+eval_max_samples:
+  desc: null
+  value: 100
+exp_dir:
+  desc: null
+  value: /data/results/pl-model=EarlyFusionCnnTransformer/siglip_base_3_double_det,dataset=ABLATION_FOUR_TASKS,batch_size=224,lr=0.0002,scale=397648
+exp_name:
+  desc: null
+  value: pl-model=EarlyFusionCnnTransformer/siglip_base_3_double_det,dataset=ABLATION_FOUR_TASKS,batch_size=224,lr=0.0002,scale=397648
+final_prob_sample_last_steps:
+  desc: null
+  value: 0
+init_model:
+  desc: null
+  value: null
+init_prob_sample_last_steps:
+  desc: null
+  value: 0
+input_sensors:
+  desc: null
+  value:
+  - raw_navigation_camera
+  - raw_manipulation_camera
+  - an_object_is_in_hand
+  - last_actions
+  - nav_task_relevant_object_bbox
+  - manip_task_relevant_object_bbox
+  - nav_accurate_object_bbox
+  - manip_accurate_object_bbox
+log_video_every:
+  desc: null
+  value: 2000
+loss:
+  desc: null
+  value: action
+lr:
+  desc: null
+  value: 0.0002
+max_epochs:
+  desc: null
+  value: 400
+max_samples:
+  desc: null
+  value: 397648
+model:
+  desc: null
+  value: EarlyFusionCnnTransformer
+model_version:
+  desc: null
+  value: siglip_base_3_double_det
+num_datasets:
+  desc: null
+  value: 4
+num_nodes:
+  desc: null
+  value: 1
+output_dir:
+  desc: null
+  value: /data/results
+per_gpu_batch:
+  desc: null
+  value: 28
+precision:
+  desc: null
+  value: 16-mixed
+reduce_action_redundancy:
+  desc: null
+  value: false
+resume:
+  desc: null
+  value: true
+resume_local:
+  desc: null
+  value: null
+run_id:
+  desc: null
+  value: xuk5ug5l
+save_every:
+  desc: null
+  value: 2000
+sliding_window:
+  desc: null
+  value: 100
+step:
+  desc: null
+  value: 50000
+wandb_logging:
+  desc: null
+  value: true
