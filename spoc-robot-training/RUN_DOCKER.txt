@@ -1,0 +1,15 @@
+sudo docker run \
+  --name spoc_container \
+  --gpus all \
+  --device /dev/dri \
+  --mount type=bind,source=/home/bera/Desktop/Codes/SPOC/spoc-robot-training,target=/root/spoc \
+  --mount type=bind,source=/home/bera/Desktop/Codes/SPOC/spoc-robot-training/Evaluation,target=/root/data \
+  --shm-size 64G \
+  -it spoc-base-20251119:latest
+
+
+sudo docker start -ai spoc_container
+
+# allow local root (or containers running as root) to connect to X
+xhost +local:root
+
