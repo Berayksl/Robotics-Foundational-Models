@@ -1,5 +1,4 @@
-##Hard filtering using future robustness degree and Q values (2/11/2026) (forward propagate for all actions)
-
+#Hard filtering using future robustness degree and Q values (2/15/2026) (forward propagate starting from the worst action (lowest Q))
 import multiprocessing as mp
 import os
 import platform
@@ -418,23 +417,39 @@ class OnlineEvaluatorWorker:
 
                 print("current state:", current_state)
 
-                if action != "sub_done" and not target_reached:
+                if not target_reached:
                     regular_actions = ['m', 'b', 'l', 'r', 'ls', 'rs']
                     regular_action_logits = np.array([logits[action_list.index(a)] for a in regular_actions])
 
                     if not main_task_done:
-                        
-                        for a in regular_actions:
-                            future_trajectory = forward_propagate(env_2d, current_state, eps_idx, a, STL_horizon, Q_net)
-                            future_robustness = calculate_robustness(future_trajectory, env_2d.goals[0]['center'], env_2d.goals[0]['radius'])
-                            if future_robustness < 0:
-                                print(f"Action {a} leads to STL violation with robustness {future_robustness}. Setting its logit to -inf.")
-                                regular_action_logits[regular_actions.index(a)] = -float('inf')
+                        state_norm = normalize_state(env_2d, current_state, device = device)
+                        t_norm = float(eps_idx) / float(max(STL_horizon-1, 1))
+                        t_tensor = torch.tensor([[t_norm]], dtype=torch.float32, device=device)  # (1,1)
+                        x = torch.cat([state_norm, t_tensor], dim=1) 
+                        Q_values = Q_net(x)
 
+                        sorted_q, indices = torch.sort(Q_values, dim=1)
+
+                        task_satisifiable = False
+                        j = 0
+                        while not task_satisifiable:
+                            worst_action_idx = indices[0, j].item()
+                            worst_action = regular_actions[worst_action_idx]
+                            print(f"Checking if action {worst_action} is satisifiable...")
+                            future_trajectory = forward_propagate(env_2d, current_state, eps_idx, worst_action, STL_horizon, Q_net)
+                            future_robustness = calculate_robustness(future_trajectory, env_2d.goals[0]['center'], env_2d.goals[0]['radius'])
+                            if future_robustness >= 0:
+                                task_satisifiable = True
+                                print(f"Action {worst_action} is satisifiable.")
                             else:
-                                print("future trajectory for action", a, ":", future_trajectory)
-                            # print(f"Future trajectory under action {a}:", future_trajectory)
-                            # print('Trajectory length:', len(future_trajectory))
+                                print(f"Action {worst_action} is not satisifiable.")
+                                regular_action_logits[regular_actions.index(worst_action)] = -float('inf')
+                                j += 1
+                                if j >= len(regular_actions):
+                                    print("No satisifiable actions found.")
+                                    break
+
+
 
                         logits_tensor = torch.tensor(regular_action_logits, dtype=torch.float32, device=device)                
                         probs = torch.softmax(logits_tensor, -1)
@@ -448,12 +463,6 @@ class OnlineEvaluatorWorker:
 
                     else:
                         #Take argmax(Q) after main task is done
-                        state_norm = normalize_state(env_2d, current_state, device = device)
-                        t_norm = float(eps_idx) / float(max(STL_horizon-1, 1))
-                        t_tensor = torch.tensor([[t_norm]], dtype=torch.float32, device=device)  # (1,1)
-                        x = torch.cat([state_norm, t_tensor], dim=1) 
-                        Q_values = Q_net(x)
-
                         a_idx = Q_values.argmax(dim=1).item()
                         action = regular_actions[a_idx]
                         print(f"Main task done. Taking action with highest Q value: {action} with Q value {Q_values[0, a_idx].item()}")
