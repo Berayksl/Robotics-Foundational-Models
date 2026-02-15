@@ -85,6 +85,10 @@ objectnav_task_specs/
 affordance_data/
 
 src
+!RL/src/
+!RL/src/**
+
+Evaluation
 
 *.log
 
