@@ -327,7 +327,7 @@ class OnlineEvaluatorWorker:
         regular_Q_vals = []
         regular_logits = []
 
-        init_t = 30
+        init_t = 0
         eps_idx = init_t
         num_of_available_actions_per_step = []
 
@@ -411,7 +411,7 @@ class OnlineEvaluatorWorker:
                 full_pose = task.controller.get_current_agent_full_pose() #(x, y, z) *y is height
                 current_state = (full_pose['position']['x'], full_pose['position']['z'], full_pose['rotation']['y']) #(x, y, theta in degrees)
 
-                if np.linalg.norm(current_state[:2] - np.array(goals[0]['center'])) <= goals[0]['radius'] and not target_reached:
+                if np.linalg.norm(current_state[:2] - np.array(goals[1]['center'])) <= goals[1]['radius'] and not target_reached:
                     target_reached = True
                     print("STL task satisifed at step", eps_idx)
 
@@ -421,13 +421,13 @@ class OnlineEvaluatorWorker:
                     regular_actions = ['m', 'b', 'l', 'r', 'ls', 'rs']
                     regular_action_logits = np.array([logits[action_list.index(a)] for a in regular_actions])
 
-                    if not main_task_done:
-                        state_norm = normalize_state(env_2d, current_state, device = device)
-                        t_norm = float(eps_idx) / float(max(STL_horizon-1, 1))
-                        t_tensor = torch.tensor([[t_norm]], dtype=torch.float32, device=device)  # (1,1)
-                        x = torch.cat([state_norm, t_tensor], dim=1) 
-                        Q_values = Q_net(x)
+                    state_norm = normalize_state(env_2d, current_state, device = device)
+                    t_norm = float(eps_idx) / float(max(STL_horizon-1, 1))
+                    t_tensor = torch.tensor([[t_norm]], dtype=torch.float32, device=device)  # (1,1)
+                    x = torch.cat([state_norm, t_tensor], dim=1) 
+                    Q_values = Q_net(x)
 
+                    if not main_task_done:
                         sorted_q, indices = torch.sort(Q_values, dim=1)
 
                         task_satisifiable = False
@@ -437,7 +437,7 @@ class OnlineEvaluatorWorker:
                             worst_action = regular_actions[worst_action_idx]
                             print(f"Checking if action {worst_action} is satisifiable...")
                             future_trajectory = forward_propagate(env_2d, current_state, eps_idx, worst_action, STL_horizon, Q_net)
-                            future_robustness = calculate_robustness(future_trajectory, env_2d.goals[0]['center'], env_2d.goals[0]['radius'])
+                            future_robustness = calculate_robustness(future_trajectory, env_2d.goals[1]['center'], env_2d.goals[1]['radius'])
                             if future_robustness >= 0:
                                 task_satisifiable = True
                                 print(f"Action {worst_action} is satisifiable.")
@@ -463,6 +463,7 @@ class OnlineEvaluatorWorker:
 
                     else:
                         #Take argmax(Q) after main task is done
+                        print("Q_values", Q_values)
                         a_idx = Q_values.argmax(dim=1).item()
                         action = regular_actions[a_idx]
                         print(f"Main task done. Taking action with highest Q value: {action} with Q value {Q_values[0, a_idx].item()}")
@@ -1167,10 +1168,22 @@ if __name__ == "__main__":
     Q_net.load_state_dict(ckpt["policy_state_dict"])
     Q_net.eval()
 
-    STL_horizon = 60 #CHANGE LATER!
+    
 
     #create 2D environment for Q-network:
-    goals = {0: {'center': (5.2, 1.8), 'radius': 0.5, 'movement':{'type':'static'}}}
+
+    # goals = {0: {'center': (5.2, 1.8), 'radius': 0.5, 'movement':{'type':'static'}}}
+    # STL_tasks =  [{"goal_id": 0, "spec": dict(operator="F", a=0,  b=60, t_star=50, gamma_inf=-0.1, collision_penalty=0.0)}]
+    # STL_horizon = 60 #CHANGE LATER!
+
+
+    goals = {0: {'center': (5.2, 1.8), 'radius': 0.4, 'movement':{'type':'static'}}, #goal region for the agent
+	1: {'center': (1.8, 4.5), 'radius': 0.4, 'movement':{'type':'static'}}}
+
+    STL_tasks =  [{"goal_id": 0, "spec": dict(operator="F", a=0,  b=40, t_star=35, gamma_inf=-0.1, collision_penalty=0.0)},
+    {"goal_id": 1, "spec": dict(operator="F", a=45, b=80, t_star=75, gamma_inf=-0.1, collision_penalty=0.0)}]
+    STL_horizon = 80 #CHANGE LATER!
+
 
     targets = {}
     config = {
@@ -1188,7 +1201,8 @@ if __name__ == "__main__":
 		"dynamics": "discrete unicycle", #dynamics model to use
 		"targets": targets,
 		"disturbance": None, #disturbance range in both x and y directions [w_min, w_max]
-        "agent_as_point": True
+        "agent_as_point": True,
+        "tasks": STL_tasks,
     }
 
     env_2d = Continuous2DEnv(config)

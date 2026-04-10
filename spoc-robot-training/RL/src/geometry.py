@@ -1,5 +1,6 @@
 #geometry helpers for collusion detection in the simulation
 import numpy as np
+from collections import defaultdict
 
 def _dist_point_to_segment(p, a, b):
     """Euclidean distance from point p to segment a-b. p,a,b are (2,) arrays."""
@@ -143,3 +144,127 @@ def _compute_env_bounds_from_geom(geom):
     return x_min, x_max, y_min, y_max
 
 
+def _swept_circle_clipped_translation(
+    p0, p1, radius, polys, wall_segments, step=0.02, eps=1e-4
+):
+    """
+    Fast 'clipped-at-contact' sweep:
+    - samples along p0 -> p1 at ~step meters
+    - returns (p_clipped, collided)
+      where p_clipped is the farthest collision-free point along the segment
+      (backs off by a tiny eps along the direction).
+    This approximates: "move until right next to obstacle".
+    """
+
+    p0 = np.asarray(p0, dtype=np.float32)
+    p1 = np.asarray(p1, dtype=np.float32)
+
+    dp = p1 - p0
+    dist = float(np.linalg.norm(dp))
+
+    # No motion: just static check
+    if dist < 1e-9:
+        hit = _static_circle_collision(p0, radius, polys, wall_segments)
+        return p0.copy(), bool(hit)
+
+    # If already colliding at start, don't move
+    if _static_circle_collision(p0, radius, polys, wall_segments):
+        return p0.copy(), True
+
+    # Unit direction
+    u = dp / (dist + 1e-12)
+
+    # How many samples (include endpoint)
+    n = max(2, int(np.ceil(dist / step)) + 1)
+
+    last_safe = p0.copy()
+    collided = False
+
+    # Start from i=1 (we already checked p0)
+    for i in range(1, n):
+        alpha = i / (n - 1)
+        p = p0 + alpha * dp
+
+        if _static_circle_collision(p, radius, polys, wall_segments):
+            collided = True
+            # back off slightly from the collision point toward last_safe
+            # use last_safe + (some small retreat) to avoid "touching" numerically
+            retreat = max(eps, 0.5 * step)
+            p_back = p - retreat * u
+
+            # Ensure p_back is not behind last_safe (numerical safety)
+            # If p_back still collides, fall back to last_safe.
+            if np.linalg.norm(p_back - p0) < np.linalg.norm(last_safe - p0):
+                return last_safe.copy(), True
+
+            if _static_circle_collision(p_back, radius, polys, wall_segments):
+                return last_safe.copy(), True
+
+            return p_back.astype(np.float32), True
+
+        last_safe = p
+
+    # No collision: full move
+    return p1.copy(), False
+
+
+
+
+#FOR FAST FORWARD PROP.
+
+def _aabb_of_poly(poly):
+    # poly: (N,2) array-like
+    p = np.asarray(poly, dtype=np.float32)
+    mn = p.min(axis=0)
+    mx = p.max(axis=0)
+    return float(mn[0]), float(mn[1]), float(mx[0]), float(mx[1])
+
+def _aabb_of_segment(seg):
+    # seg: ((x0,y0),(x1,y1)) or (2,2)
+    s = np.asarray(seg, dtype=np.float32).reshape(2,2)
+    mn = s.min(axis=0); mx = s.max(axis=0)
+    return float(mn[0]), float(mn[1]), float(mx[0]), float(mx[1])
+
+class SpatialHash2D:
+    def __init__(self, cell_size: float):
+        self.h = float(cell_size)
+        self.wall_cells = defaultdict(list)   # (ix,iy) -> [segment indices]
+        self.poly_cells = defaultdict(list)   # (ix,iy) -> [poly indices]
+        self.wall_aabbs = None
+        self.poly_aabbs = None
+
+    def _cells_for_aabb(self, xmin, ymin, xmax, ymax):
+        ix0 = int(np.floor(xmin / self.h))
+        ix1 = int(np.floor(xmax / self.h))
+        iy0 = int(np.floor(ymin / self.h))
+        iy1 = int(np.floor(ymax / self.h))
+        for ix in range(ix0, ix1 + 1):
+            for iy in range(iy0, iy1 + 1):
+                yield (ix, iy)
+
+    def build(self, wall_segments, object_polys, inflate: float = 0.0):
+        # cache AABBs
+        self.wall_aabbs = []
+        for seg in wall_segments:
+            xmin, ymin, xmax, ymax = _aabb_of_segment(seg)
+            xmin -= inflate; ymin -= inflate; xmax += inflate; ymax += inflate
+            self.wall_aabbs.append((xmin, ymin, xmax, ymax))
+            for cell in self._cells_for_aabb(xmin, ymin, xmax, ymax):
+                self.wall_cells[cell].append(len(self.wall_aabbs) - 1)
+
+        self.poly_aabbs = []
+        for poly in object_polys:
+            xmin, ymin, xmax, ymax = _aabb_of_poly(poly)
+            xmin -= inflate; ymin -= inflate; xmax += inflate; ymax += inflate
+            self.poly_aabbs.append((xmin, ymin, xmax, ymax))
+            for cell in self._cells_for_aabb(xmin, ymin, xmax, ymax):
+                self.poly_cells[cell].append(len(self.poly_aabbs) - 1)
+
+    def query(self, xmin, ymin, xmax, ymax):
+        # returns sets of candidate indices
+        wall_ids = set()
+        poly_ids = set()
+        for cell in self._cells_for_aabb(xmin, ymin, xmax, ymax):
+            wall_ids.update(self.wall_cells.get(cell, ()))
+            poly_ids.update(self.poly_cells.get(cell, ()))
+        return wall_ids, poly_ids

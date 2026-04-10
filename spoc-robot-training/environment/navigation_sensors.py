@@ -11,7 +11,8 @@ from allenact_plugins.ithor_plugin.ithor_environment import IThorEnvironment
 from allenact_plugins.ithor_plugin.ithor_sensors import GoalObjectTypeThorSensor
 from allenact_plugins.ithor_plugin.ithor_tasks import ObjectNaviThorGridTask
 
-from environment.stretch_controller import StretchController
+#from environment.stretch_controller import StretchController
+from environment.stretch_controller_modified import StretchController  #CHANGE LATER!!! (3/4/2026) just for video capture
 from utils.bbox_utils import get_best_of_two_bboxes
 from utils.constants.stretch_initialization_utils import EMPTY_BBOX, EMPTY_DOUBLE_BBOX
 from utils.string_utils import (
@@ -369,7 +370,8 @@ class TaskRelevantObjectBBoxSensor(Sensor):
             max_ys.append(max_y)
 
         if self.convert_to_pixel_coords:
-            h, w = env.controller.last_event.frame.shape[:2]
+            #h, w = env.controller.last_event.frame.shape[:2]
+            h, w = 224, 396 #default values for Intel Camera (3/4/2026)
             doesnt_have_value = ~np.array([min_x != -1 for min_x in min_xs], dtype=bool)
             min_cols = w * np.array(min_xs, dtype=np.float32)
             max_cols = w * np.array(max_xs, dtype=np.float32)

@@ -157,7 +157,7 @@ def get_thor_metadata_for_house(house_dict, width=640, height=480):
 
 
 
-sys.path.append('/home/bera/Desktop/Codes/SPOC/spoc-robot-training/Evaluation')
+sys.path.append('/home/bera/Desktop/Codes/STL Aware Foundatoional Models/SPOC/spoc-robot-training/Evaluation')
 
 def load_objaverse_houses():
     subset_to_load = "val"
@@ -168,7 +168,7 @@ def load_objaverse_houses():
         path_to_splits=None,
         split_to_path={
             k: os.path.join(
-                '/home/bera/Desktop/Codes/SPOC/spoc-robot-training/Evaluation/objaverse_houses',
+                '/home/bera/Desktop/Codes/STL Aware Foundational Models/SPOC/spoc-robot-training/Evaluation/objaverse_houses',
                 f"{k}.jsonl.gz"
             )
             for k in ["train", "val", "test"]
@@ -516,6 +516,15 @@ def create_environment(
 
     house_dict = list(load_objaverse_houses())[house_index]
 
+    if house_index == 152:
+        house_dict = remove_objects_by_id(house_dict, ["FloorLamp|3|1"])
+        house_dict = remove_objects_by_id(house_dict, ["ObjaWheelchair|2|3"])
+        house_dict = remove_objects_by_id(house_dict, ["ObjaTrunk|3|3"])
+        house_dict = remove_objects_by_id(house_dict, ["chair-diningtable-2|2|2|2"])
+        house_dict = remove_objects_by_id(house_dict, ["ObjaTrunk|3|3"])
+        house_dict = remove_objects_by_id(house_dict, ["Bowl|3|30"])
+        house_dict = remove_objects_by_id(house_dict, ['SideTable|2|4'])
+
     controller, thor_meta = get_thor_metadata_for_house(house_dict)
     controller.stop() #stop the controller so Unity process is killed
 
@@ -635,11 +644,33 @@ def create_environment(
         }
         return geom
 
+def remove_objects_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+
+    new_objs = []
+    for o in house_dict.get("objects", []):
+        if o.get("id") in ids_to_remove:
+            continue
+        new_objs.append(o)
+
+    house_dict["objects"] = new_objs
+    return house_dict
+
+def remove_windows_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+    house_dict["windows"] = [w for w in house_dict.get("windows", [])
+                             if w.get("id") not in ids_to_remove]
+    return house_dict
+
+
+
 
 if __name__ == "__main__":
     house_index = int(input("Enter house index to visualize: "))
 
-    fig, ax = create_environment(
+    fig, ax, geom = create_environment(
         house_index,
         show_room_outline=False,
         object_alpha=1.0,

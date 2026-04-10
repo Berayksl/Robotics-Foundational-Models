@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from matplotlib import pyplot as plt
 import cv2
+import stlrom
 
 from architecture.agent import AbstractAgent
 from environment.manipulation_sensors import TargetObjectWasPickedUp
@@ -58,7 +59,7 @@ import prior
 from environment.stretch_controller import StretchController
 from environment.unicycle_controller import unicycle_step
 
-from robustness_calculator import calculate_robustness
+from robustness_calculator import calculate_predicate_robustness
 
 from RL.src.networks import QNetwork
 from RL.src.main import select_model_file, normalize_state
@@ -320,7 +321,7 @@ class OnlineEvaluatorWorker:
 
         additional_metrics = {}
 
-        target_reached = False
+        stl_task_done = False
         main_task_done = False
 
         normalized_q_list = []
@@ -328,9 +329,11 @@ class OnlineEvaluatorWorker:
         regular_Q_vals = []
         regular_logits = []
 
-        init_t = 30
+        init_t = 0
         eps_idx = init_t
         num_of_available_actions_per_step = []
+
+        state_trajectory = []
 
         with torch.no_grad():
             while eps_idx < task.max_steps:
@@ -411,28 +414,51 @@ class OnlineEvaluatorWorker:
 
                 full_pose = task.controller.get_current_agent_full_pose() #(x, y, z) *y is height
                 current_state = (full_pose['position']['x'], full_pose['position']['z'], full_pose['rotation']['y']) #(x, y, theta in degrees)
+                state_trajectory.append(current_state)
 
-                if np.linalg.norm(current_state[:2] - np.array(goals[0]['center'])) <= goals[0]['radius'] and not target_reached:
-                    target_reached = True
-                    print("STL task satisifed at step", eps_idx)
+                if not stl_task_done:
+                    predicate_signals = np.ones((init_t +len(state_trajectory), len(goals))) * -999 #initialize with very negative value (i.e., violation)
+                    for goal_id in goals.keys():
+                        g = goals[goal_id]
+                        predicate_robustness = calculate_predicate_robustness(state_trajectory, g['center'], g['radius'])
+                        predicate_signals[init_t:, goal_id] = predicate_robustness
+
+                    current_task_robustness = get_task_robustness(stl_task_str, predicate_signals) #calculate the overall task robustness degree for the current trajectory
+                    if current_task_robustness > 0:
+                        stl_task_done = True
+                        print("STL task satisifed at step", eps_idx)
+                
 
                 print("current state:", current_state)
 
-                if action != "sub_done" and not target_reached:
+                if action != "sub_done" and not stl_task_done:
                     regular_actions = ['m', 'b', 'l', 'r', 'ls', 'rs']
                     regular_action_logits = np.array([logits[action_list.index(a)] for a in regular_actions])
 
                     if not main_task_done:
                         
                         for a in regular_actions:
-                            future_trajectory = forward_propagate(env_2d, current_state, eps_idx, a, STL_horizon, Q_net)
-                            future_robustness = calculate_robustness(future_trajectory, env_2d.goals[0]['center'], env_2d.goals[0]['radius'])
+                            if len(state_trajectory) > STL_horizon:
+                                temp_trajectory = state_trajectory[-STL_horizon:]  #take the last STL_horizon states to calculate the robustness of the future trajectory (i.e., current trajectory + future trajectory)
+                            else:
+                                future_trajectory = forward_propagate(env_2d, current_state, eps_idx, a, STL_horizon, Q_net)
+                                temp_trajectory = state_trajectory + future_trajectory #to calculate the task robustness degree
+
+                            predicate_signals = np.ones((STL_horizon + 1, len(goals))) * -999 #initialize with very negative value (i.e., violation)
+                        
+                            for goal_id in goals.keys():
+                                g = goals[goal_id]
+                                predicate_robustness = calculate_predicate_robustness(temp_trajectory, g['center'], g['radius'])
+                                predicate_signals[init_t:, goal_id] = predicate_robustness #store the robustness value for each goal in the corresponding column
+                            #print("predicate_signals:", predicate_signals)
+                            future_robustness = get_task_robustness(stl_task_str, predicate_signals) #calculate the overall task robustness degree for the future trajectory under action a
+                            #print(f"Future robustness for action {a}:", future_robustness)
                             if future_robustness < 0:
                                 print(f"Action {a} leads to STL violation with robustness {future_robustness}. Setting its logit to -inf.")
                                 regular_action_logits[regular_actions.index(a)] = -float('inf')
 
-                            else:
-                                print("future trajectory for action", a, ":", future_trajectory)
+                            # else:
+                            #     print("future trajectory for action", a, ":", future_trajectory)
                             # print(f"Future trajectory under action {a}:", future_trajectory)
                             # print('Trajectory length:', len(future_trajectory))
 
@@ -511,7 +537,7 @@ class OnlineEvaluatorWorker:
                 
                 eps_idx += 1
 
-                if main_task_done and target_reached:
+                if main_task_done and stl_task_done:
                     break
         
 
@@ -902,10 +928,10 @@ def get_eval_run_name(args):
     return "-".join(exp_name)
 
 
-def beta_exp_saturating(t, horizon, beta_min, beta_max, k=6.0):
-    u = min(max(t / max(horizon, 1), 0.0), 1.0)
-    g = (1.0 - math.exp(-k * u)) / (1.0 - math.exp(-k))
-    return beta_min + (beta_max - beta_min) * g
+# def beta_exp_saturating(t, horizon, beta_min, beta_max, k=6.0):
+#     u = min(max(t / max(horizon, 1), 0.0), 1.0)
+#     g = (1.0 - math.exp(-k * u)) / (1.0 - math.exp(-k))
+#     return beta_min + (beta_max - beta_min) * g
 
 
 
@@ -980,9 +1006,25 @@ def forward_propagate(env, initial_state, current_t, first_action, horizon, q_ne
         state_trajectory.append(current_s)
 
     end_time = time.time()
-    print(f"Forward propagation for horizon {horizon} took {end_time - start_time:.4f} seconds")
+    #print(f"Forward propagation for horizon {horizon} took {end_time - start_time:.4f} seconds")
 
     return state_trajectory
+
+
+def get_task_robustness(task, signals):
+    stl_driver =stlrom.STLDriver()
+    stl_driver.parse_string(task)
+
+    #add the samples:
+    for i in range(signals.shape[0]):
+        sample = [i] + signals[i].tolist()
+        stl_driver.add_sample(sample)
+
+    phi = stl_driver.get_monitor("phi") #overall task
+    robustness = phi.eval_rob()
+
+    return robustness    
+
 
 
 if __name__ == "__main__":
@@ -1158,10 +1200,37 @@ if __name__ == "__main__":
     Q_net.load_state_dict(ckpt["policy_state_dict"])
     Q_net.eval()
 
+    #CASE-1:
+    stl_task_str = """
+    signal x   # signal names
+    mu_1 := x[t] > 0  # goal-1
+
+    phi := ev_[0, 60] mu_1
+    """
+
+    goals = {0: {'center': (5.2, 1.8), 'radius': 0.5, 'movement':{'type':'static'}}}
+    STL_tasks =  [{"goal_id": 0, "spec": dict(operator="F", a=0,  b=60, t_star=50, gamma_inf=-0.1, collision_penalty=0.0)}]
     STL_horizon = 60 #CHANGE LATER!
 
-    #create 2D environment for Q-network:
-    goals = {0: {'center': (5.2, 1.8), 'radius': 0.5, 'movement':{'type':'static'}}}
+
+
+    # #CASE-2:
+    # stl_task_str = """
+    #     signal x, y    # signal names
+    #     mu_1 := x[t] > 0  # goal-1
+    #     mu_2 := y[t] > 0   #goal-2
+
+    #     phi1 := ev_[0, 40] mu_1
+    #     phi2 := ev_[45, 80] mu_2  # eventually (or F) 
+    #     phi := phi1 and phi2   # boolean combination 
+    #     """
+
+    # goals = {0: {'center': (5.2, 1.8), 'radius': 0.4, 'movement':{'type':'static'}}, #goal region for the agent
+	# 1: {'center': (1.8, 4.5), 'radius': 0.4, 'movement':{'type':'static'}}}
+
+    # STL_tasks =  [{"goal_id": 0, "spec": dict(operator="F", a=0,  b=40, t_star=35, gamma_inf=-0.1, collision_penalty=0.0)},
+    # {"goal_id": 1, "spec": dict(operator="F", a=45, b=80, t_star=75, gamma_inf=-0.1, collision_penalty=0.0)}]
+    # STL_horizon = 80 #CHANGE LATER!
 
     targets = {}
     config = {
@@ -1179,7 +1248,8 @@ if __name__ == "__main__":
 		"dynamics": "discrete unicycle", #dynamics model to use
 		"targets": targets,
 		"disturbance": None, #disturbance range in both x and y directions [w_min, w_max]
-        "agent_as_point": True
+        "agent_as_point": True,
+        "tasks": STL_tasks,
     }
 
     env_2d = Continuous2DEnv(config)

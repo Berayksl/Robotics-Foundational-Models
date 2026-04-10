@@ -20,7 +20,7 @@ LARGE_OBJECT_KEYWORDS = {
 
     # furniture
     "table", "sofa", "couch", "chair", "armchair", "bed", "stand",
-    "dresser", "shelf", "bookshelf", "cabinet", "nightstand", "plant", "shelves",
+    "dresser", "shelf", "bookshelf", "cabinet", "nightstand", "plant", "shelves", "mailbox", "stool",
 
     # electronics
     "tv", "television", "stand", "floorlamp",
@@ -104,12 +104,55 @@ def footprint_from_aabb(obj: dict):
 
     return np.array([[x0, z0], [x1, z0], [x1, z1], [x0, z1]], dtype=np.float32)
 
+
+def countertop_L_approx(obj: dict, thickness_ratio=0.30):
+    aabb = obj.get("axisAlignedBoundingBox", None)
+    if not aabb or "cornerPoints" not in aabb or not aabb["cornerPoints"]:
+        # fallback: use your AABB rectangle if cornerPoints missing
+        return [footprint_from_aabb(obj)]
+
+    pts = np.array(aabb["cornerPoints"], dtype=np.float32)  # (8,3)
+    minx, maxx = pts[:, 0].min(), pts[:, 0].max()
+    minz, maxz = pts[:, 2].min(), pts[:, 2].max()
+
+    sx = maxx - minx
+    sz = maxz - minz
+    if sx <= 1e-6 or sz <= 1e-6:
+        return [footprint_from_aabb(obj)]
+
+    t = thickness_ratio * min(sx, sz)
+
+    # default "└" in world axes using AABB extents
+    rect1 = np.array([[minx, minz],
+                      [maxx, minz],
+                      [maxx, minz + t],
+                      [minx, minz + t]], dtype=np.float32)
+
+    rect2 = np.array([[minx, minz],
+                      [minx + t, minz],
+                      [minx + t, maxz],
+                      [minx, maxz]], dtype=np.float32)
+
+    return [rect1, rect2]
+
+
 def get_large_object_footprint(obj: dict):
     """
-    Prefer OBB footprint if available (more accurate under rotation),
+    Prefer OBB footprint if available,
     else fall back to AABB.
-    Returns (poly_xz, source_str).
+    Special-case L countertops -> return list of polys.
     """
+    t_low = obj.get("objectType", "").lower()
+    asset_id = (obj.get("assetId") or "").lower()
+
+    # ---- Special-case: L countertops (assetId hint) ----
+    if "countertop" in t_low and "_l_" in asset_id:
+        polys = countertop_L_approx(obj, thickness_ratio=0.30)
+        # Return as list + tag
+        # (we keep area check in draw_large_objects)
+        return polys, "L_APPROX"
+
+    # ---- Default behavior: single polygon ----
     poly = footprint_from_obb(obj)
     if poly is not None and _poly_area(poly) > 1e-6:
         return poly, "OBB"
@@ -118,38 +161,42 @@ def get_large_object_footprint(obj: dict):
         return poly, "AABB"
     return None, None
 
+
 def draw_large_objects(ax, thor_meta, alpha=0.35):
-    """
-    Overlay large objects on ax using their footprints.
-    """
     objs = thor_meta.get("objects", [])
     kept = []
     for o in objs:
         if not is_large_house_object(o):
             continue
 
-        poly, src = get_large_object_footprint(o)
-        if poly is None:
+        poly_or_polys, src = get_large_object_footprint(o)
+        if poly_or_polys is None:
             continue
 
-        kept.append((o, poly, src))
+        # normalize to list
+        if isinstance(poly_or_polys, list):
+            polys = poly_or_polys
+        else:
+            polys = [poly_or_polys]
 
-    # Plot
+        for poly in polys:
+            if poly is None or _poly_area(poly) <= 1e-6:
+                continue
+            kept.append((o, poly, src))
+
     for o, poly, src in kept:
         xs = poly[:, 0].tolist()
         zs = poly[:, 1].tolist()
         xs, zs = _close(xs, zs)
 
-        ax.fill(xs, zs, alpha=alpha, zorder=3)   # no explicit color to respect your defaults
+        ax.fill(xs, zs, alpha=alpha, zorder=3)
         ax.plot(xs, zs, linewidth=2, zorder=4)
 
-        # label at centroid
         cx, cz = float(np.mean(poly[:, 0])), float(np.mean(poly[:, 1]))
         label = o.get("objectType", "Obj")
         ax.text(cx, cz, label, fontsize=8, ha="center", va="center", zorder=5)
 
     return kept
-
 
 def get_thor_metadata_for_house(house_dict, width=640, height=480):
     c = Controller(headless=True, width=width, height=height)

@@ -57,7 +57,8 @@ import prior
 from environment.stretch_controller import StretchController
 from environment.unicycle_controller import unicycle_step
 
-from robustness_calculator import calculate_robustness
+
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Online evaluation")
@@ -162,8 +163,14 @@ class OnlineEvaluatorWorker:
 
     def get_house(self, sample):
         house_idx = int(sample["house_id"])
-        print(self.houses[house_idx])
-        return self.houses[house_idx], house_idx
+        house = self.houses[house_idx]
+        if house_idx == 9:
+            print("Applying house-specific object and window removals for house 9")
+            ids_to_remove = ["ObjaFoldingChair|2|2"]
+            house = remove_objects_by_id(house, ids_to_remove)
+            windows_to_remove = ["window|2|1"]
+            house = remove_windows_by_id(house, windows_to_remove)
+        return house, house_idx
 
     def get_agent_starting_position(self, sample):
         x, y, z = sample["observations"]["initial_agent_location"][:3]
@@ -372,6 +379,7 @@ class OnlineEvaluatorWorker:
                     
                     # Get and display action
                     action, logits = agent.get_action(observations, goal)
+                    probs = torch.softmax(torch.tensor(logits), -1)
                     #print('action probs:',probs)
                     #print(f"probs: {probs}")
                     cv2.putText(display_frame, f"Action: {action}", (10, 90),
@@ -388,6 +396,7 @@ class OnlineEvaluatorWorker:
                         break
                 else:
                     action, logits = agent.get_action(observations, goal)
+                    probs = torch.softmax(torch.tensor(logits), -1)
 
                 all_frames.append(curr_frame)
                 
@@ -396,37 +405,33 @@ class OnlineEvaluatorWorker:
 
                 full_pose = task.controller.get_current_agent_full_pose() #(x, y, z) *y is height
                 current_state = (full_pose['position']['x'], full_pose['position']['z'], full_pose['rotation']['y']) #(x, y, theta in degrees)
-                goal_center = (1.5, 7.5) # Center of the goal region
 
-                if np.linalg.norm(current_state[:2] - np.array(goal_center)) <= 0.5:
-                    target_reached = True
+                # if action != "sub_done" and not target_reached:
+                #     regular_actions = ['m', 'r', 'l', 'b', 'ls', 'rs']
+                #     robustness_values = np.zeros(len(action_list))
 
-                if action != "sub_done" and not target_reached:
-                    regular_actions = ['m', 'r', 'l', 'b', 'ls', 'rs']
-                    robustness_values = np.zeros(len(action_list))
+                #     for a in action_list:
+                #         if a not in regular_actions:
+                #             robustness_values[action_list.index(a)] = -float('inf')
+                #         else:
+                #             next_state, v, omega = unicycle_step(current_state, a)
+                #             robustness = calculate_robustness(next_state, goal_center= goal_center)
+                #             robustness_values[action_list.index(a)] = robustness
 
-                    for a in action_list:
-                        if a not in regular_actions:
-                            robustness_values[action_list.index(a)] = -float('inf')
-                        else:
-                            next_state, v, omega = unicycle_step(current_state, a)
-                            robustness = calculate_robustness(next_state, goal_center= goal_center)
-                            robustness_values[action_list.index(a)] = robustness
+                #     alpha = 0.5  # a temperature parameter that adjusts the sharpness of the bias
+                #     robustness_weights = np.exp(alpha * robustness_values)
 
-                    alpha = 0.5  # a temperature parameter that adjusts the sharpness of the bias
-                    robustness_weights = np.exp(alpha * robustness_values)
+                #     #set the elements with -inf robustness to -inf weight
+                #     #robustness_weights[np.isneginf(robustness_values)] = -float('inf')
 
-                    #set the elements with -inf robustness to -inf weight
-                    #robustness_weights[np.isneginf(robustness_values)] = -float('inf')
-
-                    beta = 0 # scaling factor for robustness influence (best value = 100)
-                    modified_logits = logits + beta * robustness_weights
-                    modified_logits = torch.tensor(modified_logits)
+                #     beta = 0 # scaling factor for robustness influence (best value = 100)
+                #     modified_logits = logits + beta * robustness_weights
+                #     modified_logits = torch.tensor(modified_logits)
                     
 
-                    probs = torch.softmax(modified_logits, -1)
-                    action_idx = torch.distributions.categorical.Categorical(logits=modified_logits).sample() #sample the action on the modified logits
-                    action = action_list[action_idx]
+                #     probs = torch.softmax(modified_logits, -1)
+                #     action_idx = torch.distributions.categorical.Categorical(logits=modified_logits).sample() #sample the action on the modified logits
+                #     action = action_list[action_idx]
                 
                 # print("goal_reached:", goal_reached)
                 # print('Robustness values:', robustness_values.tolist())
@@ -491,13 +496,15 @@ class OnlineEvaluatorWorker:
         success = task.is_successful()
 
         print("task success:", success)
-        print('Target reached:', target_reached)
+        #print('Target reached:', target_reached)
 
         target_ids = None
         if "synset_to_object_ids" in task.task_info:
             target_ids = list(
                 chain.from_iterable(task.task_info.get("synset_to_object_ids", None).values())
             )
+
+        print("Path:", task.task_info["followed_path"])
 
         top_down_frame = get_top_down_frame(
             task.controller, task.task_info["followed_path"], target_ids
@@ -784,6 +791,33 @@ def get_eval_run_name(args):
 
     return "-".join(exp_name)
 
+def remove_objects_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+
+    new_objs = []
+    for o in house_dict.get("objects", []):
+        if o.get("id") in ids_to_remove:
+            continue
+        new_objs.append(o)
+
+    house_dict["objects"] = new_objs
+    return house_dict
+
+def remove_windows_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+    house_dict["windows"] = [w for w in house_dict.get("windows", [])
+                             if w.get("id") not in ids_to_remove]
+    return house_dict
+
+def remove_doors_by_asset_id(house_dict, asset_ids_to_remove):
+    asset_ids_to_remove = set(asset_ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+    house_dict["doors"] = [d for d in house_dict.get("doors", [])
+                           if d.get("assetId") not in asset_ids_to_remove]
+    return house_dict
+
 if __name__ == "__main__":
     os.environ["TOKENIZERS_PARALLELISM"] = "False"
     args = parse_args()
@@ -865,12 +899,28 @@ if __name__ == "__main__":
     #input_sensors=["raw_navigation_camera", "raw_manipulation_camera", "last_actions", "an_object_is_in_hand"]
 
     logging_sensor = VideoLogging()
+
+    houses_lazy = load_objaverse_houses()
+    houses = list(houses_lazy)          # materialize into a normal list of dicts
+
+    houses[9] = remove_objects_by_id(houses[9], ["ObjaFoldingChair|2|2"])
+    houses[9] = remove_windows_by_id(houses[9], ["window|2|1"])
+
+
+    houses[152] = remove_objects_by_id(houses[152], ["FloorLamp|3|1"])
+    houses[152] = remove_objects_by_id(houses[152], ["ObjaWheelchair|2|3"])
+    houses[152] = remove_objects_by_id(houses[152], ["ObjaTrunk|3|3"])
+    houses[152] = remove_objects_by_id(houses[152], ["chair-diningtable-2|2|2|2"])
+    houses[152] = remove_objects_by_id(houses[152], ["Bowl|3|30"])
+    #houses[152] = remove_doors_by_asset_id(houses[152], ["Doorframe_Double_7"])
+
+    houses[143] = remove_objects_by_id(houses[143], ["ObjaMailbox|2|3"])
     
     #start the worker:
     worker_args = {
     "gpu_device": 0,
-    "houses": load_objaverse_houses(),
-    "max_eps_len": 600,
+    "houses": houses,
+    "max_eps_len": 300,
     "input_sensors": input_sensors,
     "skip_done": False,
     "logging_sensor": logging_sensor,
@@ -942,15 +992,40 @@ if __name__ == "__main__":
     #         'observations': {'goal': 'go to a bowl', 'initial_agent_location': np.array([2.74,  0.90099216,  1.22 , 90. ,0.]), 'actions': [], 'time_ids': [], 
     #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 30, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"bowl.n.03": ["Bowl|2|5"]}, "synset_to_object_ids": {"bowl.n.03": ["Bowl|2|5"]}, "synsets": ["bowl.n.03"], "extras": {"chosen_object_id": "Bowl|2|5"}, "natural_language_spec": "go to a bowl", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
     
-    #find a bowl in house 8:
-    task = {'sample_id': 'task=ObjectNavType,house=8,sub_house_id=8', 'house_id': '8', 'task_type': 'ObjectNavType', 'sub_house_id': 8, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
-            'observations': {'goal': 'go to a bowl', 'initial_agent_location': np.array([1.74,  0.90099216,  3.22 , 90. ,0.]), 'actions': [], 'time_ids': [], 
-            'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 8, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"chair.n.01": ["chair-diningtable-4|3|0|1"]}, "synset_to_object_ids": {"chair.n.01": ["chair-diningtable-4|3|0|1"]}, "synsets": ["chair.n.01"], "extras": {"chosen_object_id": "chair-diningtable-4|3|0|1"}, "natural_language_spec": "find a chair", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["furniture.n.01"], "freqs": [15]}'}}
+    # #find a bowl in house 8:
+    # task = {'sample_id': 'task=ObjectNavType,house=8,sub_house_id=8', 'house_id': '8', 'task_type': 'ObjectNavType', 'sub_house_id': 8, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+    #         'observations': {'goal': 'go to a bowl', 'initial_agent_location': np.array([1.74,  0.90099216,  3.22 , 90. ,0.]), 'actions': [], 'time_ids': [], 
+    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 8, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"chair.n.01": ["chair-diningtable-4|3|0|1"]}, "synset_to_object_ids": {"chair.n.01": ["chair-diningtable-4|3|0|1"]}, "synsets": ["chair.n.01"], "extras": {"chosen_object_id": "chair-diningtable-4|3|0|1"}, "natural_language_spec": "find a chair", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["furniture.n.01"], "freqs": [15]}'}}
+    
+    # #find a bowl in house 9:
+    # task = {'sample_id': 'task=ObjectNavType,house=8,sub_house_id=9', 'house_id': '9', 'task_type': 'ObjectNavType', 'sub_house_id': 9, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+    #         'observations': {'goal': 'go to a bowl', 'initial_agent_location': np.array([5,  0.90099216,  8 , 270. ,0.]), 'actions': [], 'time_ids': [], 
+    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 9, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"bowl.n.03": ["Bowl|3|19"]}, "synset_to_object_ids": {"bowl.n.03": ["Bowl|3|19"]}, "synsets": ["bowl.n.03"], "extras": {"chosen_object_id": "Bowl|3|19"}, "natural_language_spec": "go to a bowl", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
     
 
+    # #find a bowl in house 152:
+    task = {'sample_id': 'task=ObjectNavType,house=152,sub_house_id=152', 'house_id': '152', 'task_type': 'ObjectNavType', 'sub_house_id': 152, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+            'observations': {'goal': 'go to a bowl', 'initial_agent_location': np.array([7,  0.90099216,  2 , 270. ,0.]), 'actions': [], 'time_ids': [], 
+            'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 152, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 60, "broad_synset_to_object_ids": {"bowl.n.03": ["Bowl|2|5"]}, "synset_to_object_ids": {"bowl.n.03": ["Bowl|2|5"]}, "synsets": ["bowl.n.03"], "extras": {"chosen_object_id": "Bowl|2|5"}, "natural_language_spec": "go to a bowl", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+    
 
+    # task = {'sample_id': 'task=ObjectNavType,house=152,sub_house_id=152', 'house_id': '152', 'task_type': 'ObjectNavType', 'sub_house_id': 152, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+    #         'observations': {'goal': 'find a tomato then find a bowl', 'initial_agent_location': np.array([7,  0.90099216,  2 , 270. ,0.]), 'actions': [], 'time_ids': [], 
+    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 152, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 60, "broad_synset_to_object_ids": { "tomato.n.01": ["Tomato|2|17"]}, "synset_to_object_ids": { "tomato.n.01": ["Tomato|2|17"]}, "synsets": [ "tomato.n.01"], "extras": {"chosen_object_id": "Tomato|2|17"}, "natural_language_spec": "find a bowl and find a tomato", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+    
 
-    num_trials = 50
+    # #go to a cellphone in house 152:
+    # task = {'sample_id': 'task=ObjectNavType,house=152,sub_house_id=152', 'house_id': '152', 'task_type': 'ObjectNavType', 'sub_house_id': 152, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+    #         'observations': {'goal': 'find a cellphone', 'initial_agent_location': np.array([3,  0.90099216,  1 , 270. ,0.]), 'actions': [], 'time_ids': [], 
+    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 152, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"cellular_telephone.n.01": ["CellPhone|3|22"]}, "synset_to_object_ids": {"cellular_telephone.n.01": ["CellPhone|3|22"]}, "synsets": ["cellular_telephone.n.01"], "extras": {"chosen_object_id": "CellPhone|3|22"}, "natural_language_spec": "go to a television", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+
+    # #find a bowl in house 143:
+    # task = {'sample_id': 'task=ObjectNavType,house=143,sub_house_id=143', 'house_id': '143', 'task_type': 'ObjectNavType', 'sub_house_id': 143, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+    #         'observations': {'goal': 'find a pan', 'initial_agent_location': np.array([3.5,  0.90099216,  7.5 , 180. ,0.]), 'actions': [], 'time_ids': [], 
+    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 143, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 60, "broad_synset_to_object_ids": {"pan.n.01": ["Pan|2|14"]}, "synset_to_object_ids": {"pan.n.01": ["Pan|2|14"]}, "synsets": ["pan.n.01"], "extras": {"chosen_object_id": "Pan|2|14"}, "natural_language_spec": "find a pan", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+    
+
+    num_trials = 1
     num_success = 0
     total_eps_len = 0
     num_target_reached = 0
@@ -995,24 +1070,4 @@ if __name__ == "__main__":
     print('Total time elapsed:', elapsed_time, 'seconds')
     print("Target reached in", num_target_reached, "out of", num_trials, "trials.")
 
-
-
-    # # Ensure the model can be loaded
-    # agent_class.build_agent(**agent_input, device="cuda")
-
-    # print("Agent built successfully, starting evaluation...")
-
-
-
-    # task = ObjectNavTask(task_info={'task_type': 'ObjectNavType', 'house_index': '13653', 'num_rooms': 4, 'agent_starting_position': {'x': 4.199999809265137, 'y': 0.9009921550750732, 'z': 5.0}, 'agent_y_rotation': 90.0, 'natural_language_spec': 'go to an alarm clock', 'eval_info': {'sample_id': 'task=ObjectNavType,house=13653,sub_house_id=127', 'needs_video': True, 'task_type': 'ObjectNavType', 'house_index': 13653, 'agent_starting_position': [4.199999809265137, 0.9009921550750732, 5.0], 'agent_y_rotation': 90.0, 'expert_length_bucket': 'short', 'expert_length': 30, 'broad_synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'synsets': ['alarm_clock.n.01'], 'extras': {'chosen_object_id': 'AlarmClock|4|5'}, 'natural_language_spec': 'go to an alarm clock', 'task_path': '/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4', 'hypernyms': ['instrument.n.01'], 'freqs': [15]}, 'synsets': ['alarm_clock.n.01'], 'synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'broad_synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'extras': {}, 'followed_path': [{'x': 4.199999809265137, 'y': 0.9009921550750732, 'z': 5.0}], 'agent_poses': [{'name': 'agent', 'position': {'x': 4.199999809265137, 'y': 0.9009921550750732, 'z': 5.0}, 'rotation': {'x': -0.0, 'y': 90.0, 'z': 0.0}, 'cameraHorizon': 25.200002670288086, 'isStanding': False, 'inHighFrictionArea': False, 'arm': {'joints': [{'name': 'stretch_robot_lift_jnt', 'position': {'x': 4.12999963760376, 'y': 0.4152766466140747, 'z': 5.135000228881836}, 'rootRelativePosition': {'x': 0.04607595503330231, 'y': 0.32747650146484375, 'z': -0.2787679135799408}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_1_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.8802900314331055}, 'rootRelativePosition': {'x': 0.0829993188381195, 'y': 0.32747650146484375, 'z': -0.024057626724243164}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_2_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.8672895431518555}, 'rootRelativePosition': {'x': 0.0829993188381195, 'y': 0.32747650146484375, 'z': -0.011057138442993164}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_3_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.8542890548706055}, 'rootRelativePosition': {'x': 0.08299930393695831, 'y': 0.32747650146484375, 'z': 0.001943349838256836}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_4_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.841289043426514}, 'rootRelativePosition': {'x': 0.08299930393695831, 'y': 0.32747650146484375, 'z': 0.01494339108467102}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_5_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.829542636871338}, 'rootRelativePosition': {'x': 0.08299930393695831, 'y': 0.32747650146484375, 'z': 0.026689797639846802}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_wrist_1_jnt', 'position': {'x': 4.1761474609375, 'y': 0.4017653465270996, 'z': 4.856293201446533}, 'rootRelativePosition': {'x': -7.193908095359802e-05, 'y': 0.31396520137786865, 'z': -6.085634231567383e-05}, 'rotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'rootRelativeRotation': {'x': 0.0, 'y': 1.0, 'z': 0.0, 'w': 180.0}, 'localRotation': {'x': 0.0, 'y': 1.0, 'z': 0.0, 'w': 180.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_wrist_2_jnt', 'position': {'x': 4.1761474609375, 'y': 0.35102641582489014, 'z': 4.856293201446533}, 'rootRelativePosition': {'x': -7.193908095359802e-05, 'y': 0.2632262706756592, 'z': -6.085634231567383e-05}, 'rotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'rootRelativeRotation': {'x': 0.0, 'y': 1.0, 'z': 0.0, 'w': 180.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}], 'heldObjects': [], 'pickupableObjects': [], 'touchedNotHeldObjects': [], 'handSphereCenter': {'x': 4.1761474609375, 'y': 0.25239962339401245, 'z': 5.060993194580078}, 'handSphereRadius': 0.05999999865889549}}], 'taken_actions': [], 'action_successes': [], 'id': 'ObjectNavType_13653_1763743654_gotoanalarmclock'})
-
-    # houses = load_objaverse_houses()
-    # print(houses)
-    # gpu_device = gpu_devices[0]
-    # worker_id = 0
-    # worker_args = {'gpu_device': 0, 'houses': houses, 'max_eps_len': -1, 'input_sensors': ['raw_navigation_camera', 'raw_manipulation_camera', 'last_actions', 'an_object_is_in_hand', 'nav_task_relevant_object_bbox', 'manip_task_relevant_object_bbox', 'nav_accurate_object_bbox', 'manip_accurate_object_bbox'],
-    #       'skip_done': False, 'logging_sensor': <utils.visualization_utils.VideoLogging object at 0x74e9447740a0>,
-    #       'outdir': 'tmp_log/OnlineEval-revision-chores-small-training_run_id=SigLIP-ViTb-3-double-det-CHORES-S-eval_dataset=-eval_subset=minival-shuffle=True-sampling=sample/11_21_2025_12_20_06_233293', 'worker_id': 0, 'det_type': 'gt'}
-
-
-    #evaluate_on_task                                                                                                                                                                                       
+                                                                                                                                                                   

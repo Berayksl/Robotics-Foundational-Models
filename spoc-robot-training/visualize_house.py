@@ -23,6 +23,50 @@ def generate_circular_path(center_x, center_z, radius, num_points, y=0.9):
         path.append({"x": x, "y": y, "z": z})
     return path
 
+def remove_objects_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+
+    new_objs = []
+    for o in house_dict.get("objects", []):
+        if o.get("id") in ids_to_remove:
+            continue
+        new_objs.append(o)
+
+    house_dict["objects"] = new_objs
+    return house_dict
+
+def remove_windows_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+    house_dict["windows"] = [w for w in house_dict.get("windows", [])
+                             if w.get("id") not in ids_to_remove]
+    return house_dict
+
+
+def remove_doors_by_asset_id(house_dict, asset_ids_to_remove):
+    asset_ids_to_remove = set(asset_ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+    house_dict["doors"] = [d for d in house_dict.get("doors", [])
+                           if d.get("assetId") not in asset_ids_to_remove]
+    return house_dict
+
+
+def replace_door_asset_ids(house_dict, replacements: dict):
+    """
+    replacements: {old_assetId: new_assetId}
+    """
+    house_dict = dict(house_dict)
+    doors = []
+    for d in house_dict.get("doors", []):
+        d2 = dict(d)
+        aid = d2.get("assetId")
+        if aid in replacements:
+            d2["assetId"] = replacements[aid]
+        doors.append(d2)
+    house_dict["doors"] = doors
+    return house_dict
+
 
 class HouseVisualizer:
     def __init__(self):
@@ -75,8 +119,8 @@ class HouseVisualizer:
         controller_args = STRETCH_ENV_ARGS.copy()
         controller_args['renderInstanceSegmentation'] = False
         controller_args['server_timeout'] = 10
-        controller_args['width'] = 800
-        controller_args['height'] = 600
+        controller_args['width'] = 1920
+        controller_args['height'] = 1080
 
         self.controller = StretchController(
             scene=house,
@@ -89,12 +133,31 @@ class HouseVisualizer:
         #print('houses:',self.houses)
         house = self.houses[house_index]
 
+        if house_index == 9:
+                # Remove specific objects from house 9
+                ids_to_remove = ["ObjaFoldingChair|2|2"]
+                house = remove_objects_by_id(house, ids_to_remove)
+                windows_to_remove = ["window|2|1"]
+                house = remove_windows_by_id(house, windows_to_remove)
+
+        elif house_index == 152:
+            house = remove_objects_by_id(house, ["FloorLamp|3|1"])
+            house = remove_objects_by_id(house, ["ObjaWheelchair|2|3"])
+            house = remove_objects_by_id(house, ["ObjaTrunk|3|3"])
+            house = remove_objects_by_id(house, ["chair-diningtable-2|2|2|2"])
+            house = remove_objects_by_id(house, ["Bowl|3|30"])
+            house = remove_objects_by_id(house, ['SideTable|2|4'])
+            #house = remove_doors_by_asset_id(house, ["Doorframe_Double_7"])
+            #house = replace_door_asset_ids(house, {"Doorframe_Double_7": "Doorway_Double_6"})
+
         print('house:', house)
 
         #print(f"Loading house {house_index}: {house}")
         
         # Initialize controller with this houseq
         controller = self.init_controller(house)
+
+        
         
         # Get top-down frame
         # Create a simple path through the house for visualization

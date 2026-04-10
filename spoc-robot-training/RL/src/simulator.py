@@ -8,15 +8,16 @@ from matplotlib.patches import RegularPolygon
 from matplotlib.transforms import Affine2D
 from matplotlib.patches import Circle
 
+
 try:
-    from geometry import _static_circle_collision, _swept_circle_collision, _compute_env_bounds_from_geom
+    from geometry import _static_circle_collision, _swept_circle_collision, _compute_env_bounds_from_geom, _swept_circle_clipped_translation, SpatialHash2D
     from dynamics import UnicycleDynamics, SingleIntegratorDynamics, DiscreteUnicycleDynamics
-    from funnel_reward import FunnelReward, FunnelSpec, ModifiedFunnelReward
+    from funnel_reward import FunnelReward, FunnelSpec, ModifiedFunnelReward, TaskDef, MultiTaskFunnelReward
     from occupancy_map import create_environment
 except ImportError:
-    from .geometry import _static_circle_collision, _swept_circle_collision, _compute_env_bounds_from_geom
+    from .geometry import _static_circle_collision, _swept_circle_collision, _compute_env_bounds_from_geom, _swept_circle_clipped_translation, SpatialHash2D
     from .dynamics import UnicycleDynamics, SingleIntegratorDynamics, DiscreteUnicycleDynamics
-    from .funnel_reward import FunnelReward, FunnelSpec, ModifiedFunnelReward
+    from .funnel_reward import FunnelReward, FunnelSpec, ModifiedFunnelReward, TaskDef, MultiTaskFunnelReward
     from .occupancy_map import create_environment
 
 #from Sequential_CBF import sequential_CBF
@@ -30,7 +31,7 @@ class Continuous2DEnv:
         self.house_index = config.get("house_index", 30)
         self.dt = config.get("dt", 0.1)
         self.render = config.get("render", False)
-        self.show_timer = config.get("show_timer", True)
+        self.show_timer = config.get("show_timer", False)
         self.dt_render = config.get("dt_render", 0.001)
         self.goals = config.get("goals", None)  # dictionary of goals for the agent
         self.obstacles = config.get("obstacles", None)  # dictionary of obstacles
@@ -42,6 +43,16 @@ class Continuous2DEnv:
         self.dynamics = config.get("dynamics", "unicycle")
         #self.u_agent_max = config.get("u_agent_max", None)  # max agent speed
         self.agent_as_point = bool(config.get("agent_as_point", False)) #whether the agent should be consider as a point mass or not
+        self.tasks_cfg = config.get("tasks", None)
+        assert self.tasks_cfg is not None and len(self.tasks_cfg) > 0, "Provide config['tasks'] list."
+        self.tasks_cfg = sorted(self.tasks_cfg, key=lambda tc: tc["spec"]["a"])
+        self.eps_len = config.get("episode_len", None)
+        self.no_reward = bool(config.get("no_reward", False))
+
+        # Track per-task completion (one flag per TASK, not per GOAL)
+        self.task_done_flags = [False] * len(self.tasks_cfg)
+
+        self.goal_ids = list(self.goals.keys()) if self.goals is not None else []
 
         if config.get("disturbance") is not None: #min and max disturbance:
             self.disturbance = True
@@ -172,25 +183,40 @@ class Continuous2DEnv:
 
         print(f"Environment width: {self.width}, height: {self.height}")
 
-        #STL task for reward computation:
-        goal_id = 0
-        spec = FunnelSpec(
-            operator="F",
-            a=0,
-            b=60,
-            t_star=50,
-            gamma_inf= -0.1,
-            x_min=self.x_min,
-            x_max=self.x_max,
-            y_min=self.y_min,
-            y_max=self.y_max,
-            collision_penalty=0.0,
-        )
 
-        g = self.goals[goal_id]
-        self.reward_fn = FunnelReward(g["center"], g["radius"], spec)
-        #self.reward_fn = ModifiedFunnelReward(g["center"], g["radius"], spec)
-        self.reward_goal_id = goal_id
+        ########################################################################
+        #FOR FAST COLLUSION CHECKING
+        self._shash = SpatialHash2D(cell_size=0.5)
+
+        # Inflate AABBs by robot radius + small margin so pruning is safe
+        inflate = (0.0 if self.agent_as_point else float(self.robot_R)) + 0.05
+        self._shash.build(self.wall_segments, self.object_polys, inflate=inflate)
+        #########################################################################
+        
+        #STL reward computation:
+
+        if not self.no_reward:
+            task_defs = []
+            prev_b = None
+            for tc in self.tasks_cfg:
+                goal_id = tc["goal_id"]
+
+                spec_dict = dict(tc["spec"])  # copy
+                spec_dict.setdefault("x_min", float(self.x_min)) #set the min/max values according to the environment bounds (if not already set in the spec)
+                spec_dict.setdefault("x_max", float(self.x_max))
+                spec_dict.setdefault("y_min", float(self.y_min))
+                spec_dict.setdefault("y_max", float(self.y_max))
+
+                spec = FunnelSpec(**spec_dict)    # includes operator,a,b,t_star,gamma_inf,...
+                start_t = spec.a if prev_b is None else prev_b
+
+                g = self.goals[goal_id]
+                fr = FunnelReward(g["center"], g["radius"], spec, time_origin=start_t)
+
+                task_defs.append(TaskDef(reward_fn=fr, a=spec.a, b=spec.b, goal_id=goal_id, start=start_t))
+                prev_b = spec.b
+
+            self.reward_fn = MultiTaskFunnelReward(task_defs, none_value=0.0)
 
         print("Environment initialized.")
 
@@ -302,104 +328,13 @@ class Continuous2DEnv:
             raise RuntimeError("No valid spawn cells found. Check robot_R, bounds, or collision geometry.")
         
 
-    # def reset(self):
-    #     """Resets the environment. If random_loc=True, sample a collision-free start (with robot size)."""
-    #     self.episode_timer = 0
-
-    #     # --- bounds: prefer house-derived bounds if available ---
-    #     if hasattr(self, "x_min") and hasattr(self, "x_max") and hasattr(self, "y_min") and hasattr(self, "y_max"):
-    #         x_lo, x_hi = float(self.x_min), float(self.x_max)
-    #         y_lo, y_hi = float(self.y_min), float(self.y_max)
-    #     else:
-    #         # fallback to your previous convention
-    #         x_lo, x_hi = -float(self.width), float(self.width)
-    #         y_lo, y_hi = -float(self.height), float(self.height)
-
-    #     # --- robot radius for collision-aware sampling ---
-    #     # If you only define robot_R when render=True, ensure a default exists:
-    #     if not hasattr(self, "robot_R"):
-    #         self.robot_R = 0.18  # same as your render radius
-
-    #     # --- helper: check if too close to any goal (including robot radius) ---
-    #     def too_close_to_goals(x, y, buffer=2.0):
-    #         p = np.array([x, y], dtype=float)
-    #         for goal in self.goals.values():
-    #             c = np.array(goal["center"], dtype=float)
-    #             R = float(goal["radius"]) + float(self.robot_R) + float(buffer)
-    #             if np.linalg.norm(p - c) <= R:
-    #                 return True
-    #         return False
-
-    #     # --- helper: free-space check using your collision checker ---
-    #     def in_free_space(x, y):
-    #         # collides_at returns True if collision
-    #         return not self.collides_at(x, y, use_swept=False)
-
-    #     if self.random_loc:
-    #         max_tries = 5000
-    #         buffer = 2.0  # your previous "goal buffer"; keep or make configurable
-
-    #         # sample until valid
-    #         for _ in range(max_tries):
-    #             x = np.random.uniform(x_lo, x_hi)
-    #             y = np.random.uniform(y_lo, y_hi)
-
-    #             # # 1) not too close to goals
-    #             # if too_close_to_goals(x, y, buffer=buffer):
-    #             #     continue
-
-    #             # 2) collision-free given robot radius
-    #             if not in_free_space(x, y):
-    #                 continue
-
-    #             # Found valid pose
-    #             if self.dynamics == "unicycle":
-    #                 theta = float(self.init_loc[2] + np.random.uniform(-np.pi, np.pi))
-    #                 self.agent = UnicycleDynamics(x=x, y=y, theta=theta, dt=self.dt)
-    #                 return np.array([self.agent.x, self.agent.y, self.agent.theta], dtype=float)
-
-    #             elif self.dynamics == "single integrator":
-    #                 self.agent = SingleIntegratorDynamics(x=x, y=y, dt=self.dt)
-    #                 return np.array([self.agent.x, self.agent.y], dtype=float)
-
-    #             elif self.dynamics == "discrete unicycle":
-    #                 theta_deg = float(np.rad2deg(np.random.uniform(-np.pi, np.pi)))
-    #                 self.agent = DiscreteUnicycleDynamics(x=x, y=y, theta=theta_deg)
-    #                 return np.array([self.agent.x, self.agent.y, self.agent.theta], dtype=float)
-
-    #             else:
-    #                 raise ValueError(f"Unknown dynamics: {self.dynamics}")
-
-    #         # If we get here, we failed to sample
-    #         raise RuntimeError(
-    #             f"reset(): Failed to sample collision-free start after {max_tries} tries. "
-    #             f"Map may be too cluttered or bounds may be wrong."
-    #         )
-
-    #     # --- non-random reset (unchanged except bounds are not applied) ---
-    #     if self.dynamics == "unicycle":
-    #         x, y, theta = float(self.init_loc[0]), float(self.init_loc[1]), float(self.init_loc[2])
-    #         self.agent = UnicycleDynamics(x=x, y=y, theta=theta, dt=self.dt)
-    #         return np.array([self.agent.x, self.agent.y, self.agent.theta], dtype=float)
-
-    #     elif self.dynamics == "single integrator":
-    #         x, y = float(self.init_loc[0]), float(self.init_loc[1])
-    #         self.agent = SingleIntegratorDynamics(x=x, y=y, dt=self.dt)
-    #         return np.array([self.agent.x, self.agent.y], dtype=float)
-
-    #     elif self.dynamics == "discrete unicycle":
-    #         x, y, theta = float(self.init_loc[0]), float(self.init_loc[1]), float(self.init_loc[2])
-    #         self.agent = DiscreteUnicycleDynamics(x=x, y=y, theta=theta)
-    #         return np.array([self.agent.x, self.agent.y, self.agent.theta], dtype=float)
-
-    #     else:
-    #         raise ValueError(f"Unknown dynamics: {self.dynamics}")
-
 
     def reset(self):
         """Resets the environment."""
         self.episode_timer = 0
-        self.task_satisfied = False
+        #self.task_satisfied = False
+        self.task_done_flags = [False] * len(self.tasks_cfg)
+
 
         if self.random_loc:
             # Make sure spawn cells are available
@@ -552,36 +487,77 @@ class Continuous2DEnv:
 
         return x1, y1, theta1_deg
     
+    # def step_discrete_with_collision(self, action):
+    #     """
+    #     Use this instead of directly calling self.agent.update(action)
+    #     for the discrete-unicycle case.
+    #     """
+    #     x0, y0, th0 = float(self.agent.x), float(self.agent.y), float(self.agent.theta)
+    #     x1, y1, th1 = self.apply_action_discrete_unicycle(action)
+
+    #     # Keep within bounds if you want (optional). If your walls are the true boundary,
+    #     # you can skip clipping and rely on wall segments. If you DO clip, do it before collision:
+    #     # x1 = np.clip(x1, -self.width, self.width)
+    #     # y1 = np.clip(y1, -self.height, self.height)
+
+    #     # rotations can't collide (unless you want "rotation in place" to collide if already intersecting)
+    #     is_translation = action in ["m", "b"]
+
+    #     if is_translation:
+    #         # swept check prevents tunneling through thin walls/edges
+    #         hit = self.collides_at(x1, y1, use_swept=True, prev_xy=(x0, y0))
+    #     else:
+    #         # for rotation-only actions, keep position same
+    #         hit = self.collides_at(x0, y0, use_swept=False)
+
+    #     if hit:
+    #         # reject: do not move
+    #         return np.array([x0, y0, th0]), True  # collided=True
+
+    #     # commit
+    #     self.agent.x, self.agent.y, self.agent.theta = x1, y1, th1
+    #     return np.array([x1, y1, th1]), False
+
+    #NEW (2/25/2026)
     def step_discrete_with_collision(self, action):
         """
-        Use this instead of directly calling self.agent.update(action)
-        for the discrete-unicycle case.
+        Discrete-unicycle step with 'clipped-at-contact' translation:
+        - For translation actions (m/b), move as far as possible toward the intended pose
+        without colliding (matches 3D sim behavior described).
+        - For rotation actions, keep position fixed.
+        Returns (state, collided_flag) where collided_flag=True if motion was clipped.
         """
         x0, y0, th0 = float(self.agent.x), float(self.agent.y), float(self.agent.theta)
         x1, y1, th1 = self.apply_action_discrete_unicycle(action)
 
-        # Keep within bounds if you want (optional). If your walls are the true boundary,
-        # you can skip clipping and rely on wall segments. If you DO clip, do it before collision:
-        # x1 = np.clip(x1, -self.width, self.width)
-        # y1 = np.clip(y1, -self.height, self.height)
-
-        # rotations can't collide (unless you want "rotation in place" to collide if already intersecting)
         is_translation = action in ["m", "b"]
 
         if is_translation:
-            # swept check prevents tunneling through thin walls/edges
-            hit = self.collides_at(x1, y1, use_swept=True, prev_xy=(x0, y0))
+            r = 0.2 if self.agent_as_point else float(self.robot_R)
+
+            p0 = np.array([x0, y0], dtype=np.float32)
+            p1 = np.array([x1, y1], dtype=np.float32)
+
+            # Clip motion instead of rejecting
+            p_clip, clipped = _swept_circle_clipped_translation(
+                p0, p1, r,
+                self.object_polys,
+                self.wall_segments,
+                step=0.02,   # tune: 0.02 is usually plenty for 0.2m actions
+                eps=1e-4
+            )
+
+            # Commit clipped pose; heading still updates like the discrete dynamics
+            self.agent.x = float(p_clip[0])
+            self.agent.y = float(p_clip[1])
+            self.agent.theta = float(th1)
+
+            return np.array([self.agent.x, self.agent.y, self.agent.theta]), bool(clipped)
+
         else:
-            # for rotation-only actions, keep position same
-            hit = self.collides_at(x0, y0, use_swept=False)
-
-        if hit:
-            # reject: do not move
-            return np.array([x0, y0, th0]), True  # collided=True
-
-        # commit
-        self.agent.x, self.agent.y, self.agent.theta = x1, y1, th1
-        return np.array([x1, y1, th1]), False
+            # Rotation-only: no translation. Optionally, you could check if you are already colliding.
+            self.agent.x, self.agent.y, self.agent.theta = x0, y0, th1
+            return np.array([x0, y0, th1]), False
     
     def step(self, action):
         """
@@ -598,6 +574,8 @@ class Continuous2DEnv:
         #update the agent's state
         if self.dynamics == "discrete unicycle":
             state, collided = self.step_discrete_with_collision(action)
+            # if collided:
+            #     print(f"Collision detected at state {state} with action '{action}'.")
 
         else:
             state = self.agent.update(action) #update the agent state
@@ -622,26 +600,31 @@ class Continuous2DEnv:
             self.goals[goal_id]['center'] = (x_new, y_new)
 
         # Compute reward
-        goal = self.goals[self.reward_goal_id]
+        pos_xy = (self.agent.x, self.agent.y)
+        coll = (collided if self.dynamics == "discrete unicycle" else False)
+
+        goal_centers = {gid: self.goals[gid]["center"] for gid in self.goals.keys()}
+        goal_radii   = {gid: self.goals[gid]["radius"] for gid in self.goals.keys()}
+
         reward = self.reward_fn(
-            pos_xy=(self.agent.x, self.agent.y),
+            pos_xy=pos_xy,
             t=self.episode_timer,
-            collided=(collided if self.dynamics == "discrete unicycle" else False),
-            goal_center=goal["center"],  
-            goal_radius=goal["radius"],
-        )
+            collided=coll,
+            goal_centers=goal_centers,
+            goal_radii=goal_radii,
+            )
 
         # Calculate distance to the goals
         dist_to_goals = {goal_id: np.linalg.norm(np.array([self.agent.x, self.agent.y]) - np.array(goal['center'])) for goal_id, goal in self.goals.items()}
-        # Check if any goal is reached
-        done = any(dist <= goal['radius'] for dist, goal in zip(dist_to_goals.values(), self.goals.values()))
+        
+        #CHANGE THIS PART LATER: currently just checking whether each goal has been reached at least once (not that important if training with fixed episode length)
+        # for k, gid in enumerate(self.goal_ids):
+        #     g = self.goals[gid]
+        #     if np.linalg.norm(np.array(pos_xy) - np.array(g["center"])) <= g["radius"]:
+        #         self.task_done_flags[k] = True
 
-        #CHANGE LATER!!!!!
-        if done and not self.task_satisfied:
-            #print("Goal reached!")
-            reward += 500  # Add a large bonus for reaching any goal
-            self.task_satisfied = True  # Mark task as satisfied to prevent multiple bonuses   
-        ########################################
+        # done = all(self.task_done_flags)
+
 
         if self.render:
             self.update_plot()
@@ -650,6 +633,8 @@ class Continuous2DEnv:
         #increment timers
         self.simulation_timer += 1
         self.episode_timer += 1
+
+        done = bool(self.episode_timer >= self.eps_len)
 
         return state, reward, done
     
@@ -966,18 +951,24 @@ class Continuous2DEnv:
             return np.array([self.agent.x, self.agent.y])
         
 if __name__ == "__main__":
-    goals = {0: {'center': (5.2, 2), 'radius': 0.3, 'movement':{'type':'static'}}, #goal region for the agent
-	#1: {'center': (-50, 0), 'radius': 10, 'movement':{'type':'static'}}
+
+    goals = {0: {'center': (5.2, 1.8), 'radius': 0.4, 'movement':{'type':'static'}}, #goal region for the agent
+	1: {'center': (1.8, 4.5), 'radius': 0.4, 'movement':{'type':'static'}}
     }
+    STL_tasks =  [{"goal_id": 0, "spec": dict(operator="F", a=50,  b=60, t_star=55, gamma_inf=-0.1, collision_penalty=0.0)},
+                  {"goal_id": 1, "spec": dict(operator="F", a=110,  b=120, t_star=115, gamma_inf=-0.1, collision_penalty=0.0)}]
+
+    STL_horizon = 60 #CHANGE LATER!
+
 
     targets = {}
     #config dictionary for the environment
     config = {
-        'house_index': 30,
-        'init_loc':[1.5, 3.0, 59.999996185302734], #initial location of the agent (x, y)
+        'house_index': 9,
+        'init_loc':[4.917691230773926, 8.299999237060547, 240.0], #initial location of the agent (x, y)
         "dt": 1,
         "render": True,
-		'dt_render': 0.1,
+		'dt_render': 0.01,
 		'goals': goals, #goal regions for the agent
         "obstacle_location": [100.0, 100.0],
         "obstacle_size": 0.0,
@@ -986,7 +977,10 @@ if __name__ == "__main__":
 		'auto_entropy':True,
 		"dynamics": "discrete unicycle", #dynamics model to use
 		"targets": targets,
-		"disturbance": None #disturbance range in both x and y directions [w_min, w_max]
+		"disturbance": None, #disturbance range in both x and y directions [w_min, w_max]
+        "tasks": STL_tasks, #STL task specifications (list of dictionaries with keys: goal_id, spec)
+        "episode_len": STL_horizon,
+        "agent_as_point": False, #whether to treat the agent as a point mass for collision checking and reward (if False, uses robot_R)
     }
 
     env = Continuous2DEnv(config)
@@ -999,18 +993,40 @@ if __name__ == "__main__":
     #actions = ["b", "b", "b", "b", "b", "b", "b", "b", "b", "b",'b', "b", "b", "b", "b", "b", "b", "b", "b", "b",'b','b', "b", "b", "b", "b", "b", "b", "b", "b", "b",'b']
 
     #actions = ["r"] * 50
-    #actions = ['stay'] *5
+    actions = ['b'] *100
 
-    actions = ['m']
-
-    for i in range(100):
+    #actions = ['m','m','m','m','m','ls','ls','ls','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m','m',]
+    robustness_values = []
+    rewards = []
+    for i in range(1):
         for action in actions:
             state, reward, done = env.step(action)
-            print(state)
+            print("state:", state)
+            rewards.append(reward)
+
+            if 50<=i <=60:
+                goal_center = goals[0]['center']
+            else:
+                goal_center = goals[1]['center']
+            robustness = goals[0]['radius'] - np.linalg.norm(np.array(state[:2]) - np.array(goal_center))
+
+            robustness_values.append(robustness)
 
             if done:
                 print(f"Episode finished after {i+1} timesteps")
                 break
+
+    robustness_values = np.array(robustness_values)
+
+    rewards = np.array(rewards)
+    funnel = robustness_values - rewards
+    
+    plt.close()
+    plt.plot(funnel)
+    plt.xlabel("Timestep")
+    plt.ylabel("Funnel function value")
+    plt.title("Funnel over time")
+    plt.show()
 
         #print("State:", state)
         # if done:
