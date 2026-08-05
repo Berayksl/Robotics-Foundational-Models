@@ -88,7 +88,7 @@ def parse_args():
     parser.add_argument("--house_set", default="procthor", help="procthor or objaverse")
     parser.add_argument("--dataset_path", default="/data/datasets")
     parser.add_argument("--output_basedir", default="tmp_log")
-    parser.add_argument("--local_checkpoint_dir", default="/home/bera/Desktop/Codes/SPOC/spoc-robot-training/Evaluation/pre-trained")
+    parser.add_argument("--local_checkpoint_dir", default="/home/bera/Desktop/Codes/STL Aware Foundational Models/SPOC/spoc-robot-training/Evaluation/pre-trained")
     parser.add_argument("--extra_tag", default="")
     parser.add_argument("--benchmark_revision", default="chores-small")
     parser.add_argument("--wandb_logging", default=False, type=str2bool)
@@ -911,7 +911,7 @@ def load_objaverse_houses():
         revision="local-objaverse-procthor-houses",
         path_to_splits=None,
         split_to_path={
-            k: os.path.join('/home/bera/Desktop/Codes/SPOC/spoc-robot-training/Evaluation/objaverse_houses', f"{k}.jsonl.gz")
+            k: os.path.join('/home/bera/Desktop/Codes/STL Aware Foundational Models/SPOC/spoc-robot-training/Evaluation/objaverse_houses', f"{k}.jsonl.gz")
             for k in ["train", "val", "test"]
         },
         max_houses_per_split=max_houses_per_split,

@@ -1,5 +1,4 @@
-#manipulates the logits based on robustness values
-
+##USING HJB APPROACH (4/10/2026)
 import multiprocessing as mp
 import os
 import platform
@@ -8,12 +7,14 @@ import traceback
 from itertools import chain
 from queue import Empty as EmptyQueueError
 from typing import Literal, Optional, Dict, Any, cast, Sequence, List
+import math
 
 import ai2thor.platform
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
 import cv2
+import stlrom
 
 from architecture.agent import AbstractAgent
 from environment.manipulation_sensors import TargetObjectWasPickedUp
@@ -57,9 +58,15 @@ import prior
 from environment.stretch_controller import StretchController
 from environment.unicycle_controller import unicycle_step
 
-from robustness_calculator import calculate_robustness
-from CLIP_similarity import clip_similarity_score
-import clip
+from robustness_calculator import calculate_goal_predicate_robustness
+from RL.src.networks import QNetwork
+from RL.src.main import select_model_file, normalize_state
+from RL.src.simulator import Continuous2DEnv
+from RL.src.dynamics import DiscreteUnicycleDynamics
+from RL.src.geometry import _swept_circle_clipped_translation
+
+#from HJB import house_BRT
+from HJB import BRT_subprocess
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Online evaluation")
@@ -80,7 +87,7 @@ def parse_args():
     parser.add_argument("--house_set", default="procthor", help="procthor or objaverse")
     parser.add_argument("--dataset_path", default="/data/datasets")
     parser.add_argument("--output_basedir", default="tmp_log")
-    parser.add_argument("--local_checkpoint_dir", default="/home/bera/Desktop/Codes/SPOC/spoc-robot-training/Evaluation/pre-trained")
+    parser.add_argument("--local_checkpoint_dir", default="/home/bera/Desktop/Codes/STL Aware Foundational Models/SPOC/spoc-robot-training/Evaluation/pre-trained")
     parser.add_argument("--extra_tag", default="")
     parser.add_argument("--benchmark_revision", default="chores-small")
     parser.add_argument("--wandb_logging", default=False, type=str2bool)
@@ -164,6 +171,7 @@ class OnlineEvaluatorWorker:
 
     def get_house(self, sample):
         house_idx = int(sample["house_id"])
+        print(self.houses[house_idx])
         return self.houses[house_idx], house_idx
 
     def get_agent_starting_position(self, sample):
@@ -290,9 +298,12 @@ class OnlineEvaluatorWorker:
         return self._task_sampler
 
     def evaluate_on_task(self, task: AbstractSPOCTask, agent: AbstractAgent, worker_id: int):
-        global target_reached
+        #global target_reached
+        global stl_task_done
 
         goal = task.task_info["natural_language_spec"]
+
+        #print(task.task_info['house'])
         #print(task.task_info)
 
         object_type = task.task_info["synsets"][0]
@@ -312,36 +323,24 @@ class OnlineEvaluatorWorker:
         all_actions = []
 
         additional_metrics = {}
+        main_task_done = False #whether FM thinks the main task is satisfied
+        main_task_actually_done = False #whether the main task is actually done according to the task's definition of success (which may not be the same as FM's prediction of whether the main task is done)
+        mismatch_episode = False
 
-        target_reached = False
+        normalized_q_list = []
+        normalized_logit_list = []
+        regular_Q_vals = []
+        regular_logits = []
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        init_t = 0
+        eps_idx = init_t
+        num_of_available_actions_per_step = []
 
-        clip_model, preprocess = clip.load("ViT-B/16", device=device)
-        clip_model.eval()
-
-        clip_prompts = [
-                "a television",
-                "a TV",
-                "a flat screen television",
-                "a television screen",
-                "a flat screen TV", 
-                "a black television screen",
-                "a turned off television"
-            ]
-        
-        prev_action = None
-
-        regular_actions = ['m', 'r', 'l', 'b', 'ls', 'rs']
-
-        clip_peak = -float("inf")
-        action_memory = {a: 0.0 for a in regular_actions}
-
-        eta = 0.3        # memory update rate
-        lambda_clip = 1.0  # logit bias strength
+        state_trajectory = [] + [(9999, 9999, 0)] * init_t #add very far away states so the robustness values would be too low (for reachability predicates) FIXME: this is a hack to handle the test cases where init_t != 0 but ideally we should start from 0
 
         with torch.no_grad():
-            for eps_idx in range(task.max_steps):
+            while eps_idx < task.max_steps:
+                print("time step:", eps_idx)
                 observations = task.get_observations()
 
                 assert all(
@@ -356,42 +355,10 @@ class OnlineEvaluatorWorker:
 
                 observations = {k: v for k, v in observations.items() if k in self.input_sensors}
 
-                #save frames every 10 steps
-                if eps_idx % 10 == 0:
-                    cv2.imwrite(
-                        os.path.join(
-                            '/home/bera/Pictures/SPOC screenshots',
-                            f"worker_{worker_id}_task_{task_path.replace('/', '_')}_step_{eps_idx}.png",
-                        ),
-                        task.controller.navigation_camera,
-                    )
-
 
                 curr_frame = np.concatenate(
                     [task.controller.navigation_camera, task.controller.manipulation_camera], axis=1
                 )
-
-                clip_similarity_score_value = clip_similarity_score(
-                    clip_model,
-                    preprocess,
-                    clip_prompts,
-                    task.controller.navigation_camera,
-                )
-
-                print(action_memory)
-                #print("CLIP similarity score:", clip_similarity_score_value)
-
-                #update the peak value
-                new_peak = max(clip_peak, clip_similarity_score_value)
-                delta = new_peak - clip_peak
-                clip_peak = new_peak
-
-                if delta > 0 and prev_action is not None:
-                    action_memory[prev_action] = (
-                        (1 - eta) * action_memory[prev_action]
-                        + eta * delta
-                    )
-
 
                 display_realtime = True
                 # REAL-TIME DISPLAY
@@ -418,12 +385,8 @@ class OnlineEvaluatorWorker:
                     
                     # Get and display action
                     action, logits = agent.get_action(observations, goal)
-                    # logits = torch.tensor([action_memory[a] for a in regular_actions])
-                    # probs = torch.softmax(logits, -1)
-                    # action_idx = torch.distributions.categorical.Categorical(logits=logits).sample() #sample the action on the modified logits
-                    # action = regular_actions[action_idx]
-                
-
+                    original_probs = torch.softmax(torch.tensor(logits), -1).detach().numpy()
+                    #print(f"probs: {probs}")
                     cv2.putText(display_frame, f"Action: {action}", (10, 90),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     
@@ -438,58 +401,104 @@ class OnlineEvaluatorWorker:
                         break
                 else:
                     action, logits = agent.get_action(observations, goal)
+                    original_probs = torch.softmax(torch.tensor(logits), -1).detach().numpy()
 
                 all_frames.append(curr_frame)
                 
-                if self.skip_done and action in ["end", "done"]:
-                    action = "sub_done"
+
+                if (action in ["end", "sub_done"]) and (not main_task_done):
+                    if task.successful_if_done(strict_success=False):
+                        main_task_actually_done = True
+
+                    main_task_done = True #consider main task done according to FM even if it's not actually done according to the task's definition of success
+                    print("FM: Main task satisifed at step", eps_idx)
+                    main_task_done_step = eps_idx
 
                 full_pose = task.controller.get_current_agent_full_pose() #(x, y, z) *y is height
                 current_state = (full_pose['position']['x'], full_pose['position']['z'], full_pose['rotation']['y']) #(x, y, theta in degrees)
-                goal_center = (1.5, 7.5) # Center of the goal region
+                state_trajectory.append(current_state)
 
-                if np.linalg.norm(current_state[:2] - np.array(goal_center)) <= 0.5:
-                    target_reached = True
+                # if not stl_task_done:
+                #     if eps_idx >= 80: #start checking STL satisfaction after 80 steps (since the second STL constraint is starts at 80)
+                #         if len(state_trajectory) > STL_horizon:
+                #             temp_trajectory = state_trajectory[:STL_horizon + 1] #get the first STL_horizon + 1 states in the trajectory to calculate the robustness values for the STL predicates (since STL specifications are defined over a finite horizon)
+                #             predicate_signals = np.ones((STL_horizon + 1, len(goals))) * -999 
+                #         else:
+                #             temp_trajectory = state_trajectory
+                #             predicate_signals = np.ones((len(state_trajectory), len(goals))) * -999 #initialize with very negative value (i.e., violation)
 
-                if action != "sub_done" and not target_reached:
-                    regular_actions = ['m', 'r', 'l', 'b', 'ls', 'rs']
-                    robustness_values = np.zeros(len(action_list))
 
-                    for a in action_list:
-                        if a not in regular_actions:
-                            robustness_values[action_list.index(a)] = -float('inf')
-                        else:
-                            next_state, v, omega = unicycle_step(current_state, a)
-                            robustness = calculate_robustness(next_state, goal_center= goal_center)
-                            robustness_values[action_list.index(a)] = robustness
+                #         for goal_id in goals.keys():
+                #             g = goals[goal_id]
+                #             predicate_robustness = calculate_goal_predicate_robustness(temp_trajectory, g['center'], g['radius'])
+                #             predicate_signals[:, goal_id] = predicate_robustness
 
-                    alpha = 0.5  # a temperature parameter that adjusts the sharpness of the bias
-                    robustness_weights = np.exp(alpha * robustness_values)
-
-                    #set the elements with -inf robustness to -inf weight
-                    #robustness_weights[np.isneginf(robustness_values)] = -float('inf')
-
-                    beta = 0  # scaling factor for robustness influence (best value = 100)
-                    modified_logits = logits + beta * robustness_weights
-                    modified_logits = torch.tensor(modified_logits)
-                    
-
-                    probs = torch.softmax(modified_logits, -1)
-                    action_idx = torch.distributions.categorical.Categorical(logits=modified_logits).sample() #sample the action on the modified logits
-                    action = action_list[action_idx]
+                #         current_task_robustness = get_task_robustness(stl_task_str, predicate_signals) #calculate the overall task robustness degree for the current trajectory
+                #         if current_task_robustness > 0:
+                #             stl_task_done = True
+                #             print("STL task satisifed at step", eps_idx)
                 
-                # print("goal_reached:", goal_reached)
-                # print('Robustness values:', robustness_values.tolist())
-                # print("Original logits:", logits)
-                # print("Modified logits:", modified_logits.tolist())
-                # print('Action taken:', action)
 
-                # print("Predicted next state:", unicycle_step(current_state, action)[0])
+                if np.linalg.norm(np.array(current_state[:2]) - np.array(goals[0]['center'])) < goals[0]['radius']:
+                    print("Goal 0 reached at step", eps_idx)
+                    stl_task_done = True
 
-                prev_action = action
+                if np.linalg.norm(np.array(current_state[:2]) - np.array(goals[1]['center'])) < goals[1]['radius']:
+                    print("Goal 1 reached at step", eps_idx)
+                    stl_task_done = True
+
+                # if not stl_task_done: #modify the distribution if STL task is not yet satisfied
+                #     regular_actions = ['m', 'b', 'l', 'r', 'ls', 'rs']
+                #     regular_action_logits = np.array([logits[action_list.index(a)] for a in regular_actions])
+                #     p = torch.softmax(torch.tensor(regular_action_logits, dtype=torch.float32), -1).detach().numpy() #original action distribution from FM
+
+
+
+                    #print('original action distribution:', p)
+
+                if eps_idx <= time_horizon:
+                    #brt_value =  house_BRT.get_brt_value_at_time(grid, all_brt_values, times, current_state, time_to_go=20 - eps_idx)
+                    # brt_value = get_brt_value_at_time_numpy(brt_data, current_state, time_to_go = time_horizon - eps_idx)
+                    # print("current state:", current_state)
+                    # print("current BRT value:", brt_value)
+
+                    regular_actions = ['m', 'b', 'l', 'r', 'ls', 'rs']
+                    regular_action_logits = np.array([logits[action_list.index(a)] for a in regular_actions])
+                    p = torch.softmax(torch.tensor(regular_action_logits, dtype=torch.float32), -1).detach().numpy() #original action distribution from FM
+
+                    v = np.zeros((len(regular_actions),), dtype=np.float64)
+                    safe_actions = []
+                    #print("current state:", current_state)
+                    for i, a in enumerate(regular_actions):
+                        next_state, _, _ = unicycle_step(current_state, a, dt=1.0) #get the next state after taking the action for 1 second according to unicycle dynamics
+                        #print('next state after action {}: {}'.format(a, next_state))
+                        next_brt_value = get_brt_value_at_time_numpy(brt_data, next_state, time_to_go = time_horizon - eps_idx - 1)
+                        v[i] = (next_brt_value < 0) #safe actions will have value 1, unsafe actions will have value 0 since the BRT value is negative inside the BRT and positive outside the BRT
+                        if v[i] > 0.5:
+                            safe_actions.append(a)
+
+                    print("safe actions according to BRT: {} at state {}".format(safe_actions, current_state))
+                    safe = (v > 0.5)
+
+                    q = np.zeros_like(p)
+                    mass = float(p[safe].sum())
+                    if mass > 0:
+                        q[safe] = p[safe] / mass #re-normalize the probabilities of the safe actions
+                    else:
+                        print("Warning: no safe actions according to BRT, using original distribution")
+                        q = p #if there are no safe actions, use the original distribution
+
+                    new_probs = torch.tensor(q, dtype=torch.float32)
+                    #print('New action distribution:', new_probs)
+                    #print('Distribution modified:' , not np.allclose(p, q))
+                    #print("q.sum =", q.sum())
+
+                    action_idx = torch.distributions.categorical.Categorical(probs=new_probs).sample() #sample the action on the modified logits
+                    action = regular_actions[action_idx]
 
                 all_actions.append(action)
                 task.step_with_action_str(action)
+
 
                 if "nav_best_bbox" in observations:
                     add_bbox_sensor_to_image(
@@ -524,7 +533,7 @@ class OnlineEvaluatorWorker:
                     agent_frame=curr_frame,
                     frame_number=eps_idx,
                     action_names=action_list,
-                    action_dist=probs.tolist(),
+                    action_dist=original_probs.tolist(),
                     ep_length=task.max_steps,
                     last_action_success=task.last_action_success,
                     taken_action=action,
@@ -533,23 +542,40 @@ class OnlineEvaluatorWorker:
 
                 all_video_frames.append(video_frame)
                 
-                if task.is_done():
-                    print(f'Task is done at step {eps_idx}, breaking out of the loop.')
+                # if task.is_done():
+                #     print(f'Task is done at step {eps_idx}, breaking out of the loop.')
+                #     break
+                
+                eps_idx += 1
+
+                if main_task_done and stl_task_done:
                     break
+        
 
         if display_realtime:
             cv2.destroyAllWindows()
-            
-        success = task.is_successful()
+        
+        # if main_task_done:
+        #     action = 'end' #take a pseudo "end" action to end the episode if main task is done but not ended due to skip_done setting, so that the final success metrics would be calculated correctly based on the task's definition of success 
+        #     task.step_with_action_str(action)
+        
+        if main_task_done:
+            print(f'Main task satisfied at step {main_task_done_step}, breaking out of the loop.')
 
-        print("task success:", success)
-        print('Target reached:', target_reached)
+        success = main_task_actually_done
+
+        print('Main task success accordign to FM:', main_task_done)
+        print("Main task success:", main_task_actually_done)
+        print('STL task success:', stl_task_done)
 
         target_ids = None
         if "synset_to_object_ids" in task.task_info:
             target_ids = list(
                 chain.from_iterable(task.task_info.get("synset_to_object_ids", None).values())
             )
+
+        #print("Path:", task.task_info["followed_path"])
+
 
         top_down_frame = get_top_down_frame(
             task.controller, task.task_info["followed_path"], target_ids
@@ -562,6 +588,11 @@ class OnlineEvaluatorWorker:
             success,
             additional_metrics,
         )
+
+        #add mismatch_episode flag to metrics so that we can analyze the mismatch cases separately
+        metrics["mismatch_episode"] = mismatch_episode
+
+        print("All actions taken:", all_actions)
 
         return dict(
             goal=goal,
@@ -648,7 +679,8 @@ class OnlineEvaluatorWorker:
         metrics = {}
 
         metrics["eps_len"] = len(all_actions)
-        metrics["success"] = float(success) + 1e-8
+        #metrics["success"] = float(success) + 1e-8
+        metrics["success"] = success
         if success:
             metrics["eps_len_succ"] = metrics["eps_len"]
         else:
@@ -808,7 +840,7 @@ def load_objaverse_houses():
         revision="local-objaverse-procthor-houses",
         path_to_splits=None,
         split_to_path={
-            k: os.path.join('/home/bera/Desktop/Codes/SPOC/spoc-robot-training/Evaluation/objaverse_houses', f"{k}.jsonl.gz")
+            k: os.path.join('/home/bera/Desktop/Codes/STL Aware Foundational Models/SPOC/spoc-robot-training/Evaluation/objaverse_houses', f"{k}.jsonl.gz")
             for k in ["train", "val", "test"]
         },
         max_houses_per_split=max_houses_per_split,
@@ -835,6 +867,133 @@ def get_eval_run_name(args):
     )
 
     return "-".join(exp_name)
+
+
+    
+
+#HELPER FUNCTIONS TO CHECK WHETHET TWO STATES ARE ALMOST THE SAME:
+def _wrap_angle_deg(a: float) -> float:
+    """Map angle to [0, 360)."""
+    return float(a) % 360.0
+
+def _angle_diff_deg(a: float, b: float) -> float:
+    """Smallest absolute difference between two headings in degrees."""
+    a = _wrap_angle_deg(a)
+    b = _wrap_angle_deg(b)
+    d = abs(a - b)
+    return min(d, 360.0 - d)
+
+def states_almost_same(
+    thor_state,              # (x, z, yaw_deg)
+    pred_state,              # (x, y, yaw_deg) or np.array([x, y, yaw])
+    *,
+    pos_tol: float = 1e-3,   # meters (start with 1e-3 to 1e-2)
+    yaw_tol: float = 1e-2,   # degrees (start with 1e-2 to 1e-1)
+) -> tuple[bool, dict]:
+    """
+    Returns (ok, info) where info has the position error and yaw error.
+    Assumes your 2D map uses (x, y) where y corresponds to THOR z.
+    """
+    tx, tz, tyaw = map(float, thor_state)
+
+    p = np.asarray(pred_state, dtype=np.float64).reshape(-1)
+    px, py, pyaw = float(p[0]), float(p[1]), float(p[2])
+
+    pos_err = float(np.hypot(tx - px, tz - py))
+    yaw_err = float(_angle_diff_deg(tyaw, pyaw))
+
+    ok = (pos_err <= pos_tol) and (yaw_err <= yaw_tol)
+    return ok, {"pos_err": pos_err, "yaw_err": yaw_err}
+
+
+
+def get_task_robustness(task, signals):
+    stl_driver =stlrom.STLDriver()
+    stl_driver.parse_string(task)
+
+    #add the samples:
+    for i in range(signals.shape[0]):
+        sample = [i] + signals[i].tolist()
+        stl_driver.add_sample(sample)
+
+    phi = stl_driver.get_monitor("phi") #overall task
+    robustness = phi.eval_rob()
+
+    return robustness    
+
+def remove_objects_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+
+    new_objs = []
+    for o in house_dict.get("objects", []):
+        if o.get("id") in ids_to_remove:
+            continue
+        new_objs.append(o)
+
+    house_dict["objects"] = new_objs
+    return house_dict
+
+def remove_windows_by_id(house_dict, ids_to_remove):
+    ids_to_remove = set(ids_to_remove)
+    house_dict = dict(house_dict)  # shallow copy
+    house_dict["windows"] = [w for w in house_dict.get("windows", [])
+                             if w.get("id") not in ids_to_remove]
+    return house_dict
+
+def get_brt_value_at_time_numpy(brt_data, state, time_to_go):
+    """
+    Get interpolated BRT value using numpy only.
+    
+    Args:
+        brt_data: dict with 'times', 'all_brt_values', 'coordinate_vectors'
+        state: [x, y, theta] where theta is in DEGREES
+        time_to_go: remaining time to reach target
+    
+    Returns:
+        Interpolated value (negative = inside BRT, positive = outside)
+    """
+    from scipy.ndimage import map_coordinates
+    
+    times = brt_data["times"]
+    all_brt_values = brt_data["all_brt_values"]
+    coord_vectors = brt_data["coordinate_vectors"]
+    
+    state = np.asarray(state, dtype=np.float64)
+    state[2] = np.deg2rad(state[2])  # Convert theta to radians
+    
+    # Time index
+    times_flipped = times[::-1]
+    indices_flipped = np.arange(len(times))[::-1]
+    query_t = -time_to_go
+    time_idx = np.interp(query_t, times_flipped, indices_flipped)
+    
+    # Spatial indices
+    indices = [time_idx]
+    for i in range(3):
+        coord_vec = coord_vectors[i]
+        lo, hi = coord_vec[0], coord_vec[-1]
+        n = len(coord_vec)
+        
+        if i == 2:  # theta periodic
+            s = state[i] % (2 * np.pi)
+        else:
+            s = state[i]
+        
+        idx = (s - lo) / (hi - lo) * (n - 1)
+        indices.append(idx)
+    
+    indices = np.array(indices).reshape(-1, 1)
+    
+    value = map_coordinates(
+        all_brt_values,
+        indices,
+        order=1,
+        mode='wrap'
+    )
+    
+    return float(value[0])
+
 
 if __name__ == "__main__":
     os.environ["TOKENIZERS_PARALLELISM"] = "False"
@@ -917,12 +1076,28 @@ if __name__ == "__main__":
     #input_sensors=["raw_navigation_camera", "raw_manipulation_camera", "last_actions", "an_object_is_in_hand"]
 
     logging_sensor = VideoLogging()
+
+    houses_lazy = load_objaverse_houses()
+    houses = list(houses_lazy)          # materialize into a normal list of dicts
+
+    houses[9] = remove_objects_by_id(houses[9], ["ObjaFoldingChair|2|2"])
+    houses[9] = remove_windows_by_id(houses[9], ["window|2|1"])
+
+    #remove stuff from house-152
+    houses[152] = remove_objects_by_id(houses[152], ["FloorLamp|3|1"])
+    houses[152] = remove_objects_by_id(houses[152], ["ObjaWheelchair|2|3"])
+    houses[152] = remove_objects_by_id(houses[152], ["ObjaTrunk|3|3"])
+    houses[152] = remove_objects_by_id(houses[152], ["chair-diningtable-2|2|2|2"])
+    houses[152] = remove_objects_by_id(houses[152], ["Bowl|3|30"])
+    houses[152] = remove_objects_by_id(houses[152], ['SideTable|2|4'])
+
+    houses[143] = remove_objects_by_id(houses[143], ["ObjaMailbox|2|3"])
     
     #start the worker:
     worker_args = {
     "gpu_device": 0,
-    "houses": load_objaverse_houses(),
-    "max_eps_len": 600,
+    "houses": houses,
+    "max_eps_len": 300,
     "input_sensors": input_sensors,
     "skip_done": False,
     "logging_sensor": logging_sensor,
@@ -937,110 +1112,190 @@ if __name__ == "__main__":
     # tasks_queue = mp.Queue()
     # results_queue = mp.Queue()
 
-    #go to an alarm clock
-    # task = {'sample_id': 'task=ObjectNavType,house=13653,sub_house_id=127', 'house_id': '013653', 'task_type': 'ObjectNavType', 'sub_house_id': 127, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
-    #         'observations': {'goal': 'find an alarm clock', 'initial_agent_location': np.array([ 4.19999981,  0.90099216,  5. ,0. , 90. ,0.]), 'actions': [], 'time_ids': [], 
-    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 13653, "agent_starting_position": [4.199999809265137, 0.9009921550750732, 5.0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"alarm_clock.n.01": ["AlarmClock|4|5"]}, "synset_to_object_ids": {"alarm_clock.n.01": ["AlarmClock|4|5"]}, "synsets": ["alarm_clock.n.01"], "extras": {"chosen_object_id": "AlarmClock|4|5"}, "natural_language_spec": "find an alarm clock", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+
+    #load the Q-network
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    idx_to_action =['m', 'b', 'l', 'r', 'ls', 'rs']
+ 
+    feat_dim = 4
+
+
+
+    ##########################################
+    # HOUSE 152 GOALS AND TASKS FOR TESTING:
+    ##########################################
+    task = {'sample_id': 'task=ObjectNavType,house=152,sub_house_id=152', 'house_id': '152', 'task_type': 'ObjectNavType', 'sub_house_id': 152, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+            'observations': {'goal': 'go to a bowl', 'initial_agent_location': np.array([7,  0.90099216,  2 , 270. ,0.]), 'actions': [], 'time_ids': [], 
+            'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 152, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"bowl.n.03": ["Bowl|2|5"]}, "synset_to_object_ids": {"bowl.n.03": ["Bowl|2|5"]}, "synsets": ["bowl.n.03"], "extras": {"chosen_object_id": "Bowl|2|5"}, "natural_language_spec": "go to a bowl", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
     
-    # #find an alarm clock in house 1
-    # task = {'sample_id': 'task=ObjectNavType,house=1,sub_house_id=127', 'house_id': '1', 'task_type': 'ObjectNavType', 'sub_house_id': 127, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
-    #         'observations': {'goal': 'find an alarm clock', 'initial_agent_location': np.array([7.,  0.90099216,  5. ,0. , 90. ,0.]), 'actions': [], 'time_ids': [], 
-    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 1, "agent_starting_position": [7.0, 0.9009921550750732, 5.0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"alarm_clock.n.01": ["AlarmClock|7|50"]}, "synset_to_object_ids": {"alarm_clock.n.01": ["AlarmClock|7|50"]}, "synsets": ["alarm_clock.n.01"], "extras": {"chosen_object_id": "AlarmClock|7|50"}, "natural_language_spec": "find an alarm clock", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
 
-    # #find a television in house 1
-    # task = {'sample_id': 'task=ObjectNavType,house=1,sub_house_id=127', 'house_id': '1', 'task_type': 'ObjectNavType', 'sub_house_id': 127, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
-    #         'observations': {'goal': 'find a television', 'initial_agent_location': np.array([1.,  0.90099216,  4. ,0. , 90. ,0.]), 'actions': [], 'time_ids': [], 
-    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 1, "agent_starting_position": [1.0, 0.9009921550750732, 4.0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"television_receiver.n.01": ["television|6|4|1"]}, "synset_to_object_ids": {"television_receiver.n.01": ["television|6|4|1"]}, "synsets": ["television_receiver.n.01"], "extras": {"chosen_object_id": "television|6|4|1"}, "natural_language_spec": "find a television", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+    # #go to a cellphone in house 152:
+    # task = {'sample_id': 'task=ObjectNavType,house=152,sub_house_id=152', 'house_id': '152', 'task_type': 'ObjectNavType', 'sub_house_id': 152, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
+    #         'observations': {'goal': 'find a cellphone', 'initial_agent_location': np.array([3,  0.90099216,  6 , 180.0 ,0.]), 'actions': [], 'time_ids': [], 
+    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 152, "agent_starting_position": [0, 0.9009921550750732, 0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"cellular_telephone.n.01": ["CellPhone|3|22"]}, "synset_to_object_ids": {"cellular_telephone.n.01": ["CellPhone|3|22"]}, "synsets": ["cellular_telephone.n.01"], "extras": {"chosen_object_id": "CellPhone|3|22"}, "natural_language_spec": "go to a television", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+
+    goals = {0: {'center': (7.5, 5.5), 'radius': 0.4, 'movement':{'type':'static'}}, #goal region for the agentssss
+	1: {'center': (1, 1.75), 'radius': 0.4, 'movement':{'type':'static'}}}
+
+    STL_tasks = [
+    {"goal_ids": [0, 1], "spec": dict(operator="F", a=0,  b=60,  t_star=50,  gamma_inf=-0.1, collision_penalty=2.0)},
+    {"goal_ids": [0, 1], "spec": dict(operator="F", a=80, b=140, t_star=130, gamma_inf=-0.1, collision_penalty=2.0)},
+    ]
+
+    STL_horizon = 140 #CHANGE LATER!
+
+    stl_task_str = """
+    signal x, y   # signal namesss
+    mu_1 := x[t] > 0  # goal-1
+    mu_2 := y[t] > 0  # goal-2
+
+    phi1 := F_[0, 60] (mu_1 or mu_2)
+    phi2 := F_[80, 140] (mu_1 or mu_2)
+    phi := phi1 and phi2
+    """
+
+
+    targets = {}
+    #config dictionary for the environment
+    config = {
+        'house_index': 152,
+        'init_loc':[1, 4, 270.0], #initial location of the agent (x, y)
+        "dt": 1,
+        "render": False,
+		'dt_render': 0.01,
+		'goals': goals, #goal regions for the agent
+        "obstacle_location": [300.0, 300.0],
+        "obstacle_size": 0.0,
+        "randomize_loc": False, #whether to randomize the agent location at the end of each episode
+		'deterministic': False,
+		"dynamics": "discrete unicycle", #dynamics model to use
+		"targets": targets,
+		"disturbance": None, #disturbance range in both x and y directions [w_min, w_max]
+		"agent_as_point": False,
+        "tasks": STL_tasks,
+        "episode_len": STL_horizon,
+        "no_reward": True
+    }
+
+
+    #env_2d = Continuous2DEnv(config)
+
+    #Solve HJB:
+    house_index = 152
+
+    target_center = (7.0, 5.5)  # Adjust based on your house
+    target_radius = 0.5
+
+
+    # Create dynamics
+    #dynamics = house_BRT.Unicycle(max_v=0.2, max_omega=1.0)
     
-    #find a television in house 0
-    task = {'sample_id': 'task=ObjectNavType,house=0,sub_house_id=127', 'house_id': '0', 'task_type': 'ObjectNavType', 'sub_house_id': 127, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
-        'observations': {'goal': 'find a television', 'initial_agent_location': np.array([7.,  0.90099216,  1.5 ,0. , 270. ,0.]), 'actions': [], 'time_ids': [], 
-        'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 0, "agent_starting_position": [7.0, 0.9009921550750732, 1], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"television_receiver.n.01": ["television|7|0|1"]}, "synset_to_object_ids": {"television_receiver.n.01": ["television|7|0|1"]}, "synsets": ["television_receiver.n.01"], "extras": {"chosen_object_id": "television|7|0|1"}, "natural_language_spec": "find a television", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+    # Compute BRT
+    # print("Computing BRT...")
+    # grid, times, target_values, obstacle_values, all_brt_values, geom = house_BRT.compute_house_brt_over_time(
+    #     dynamics=dynamics,
+    #     house_index=house_index,
+    #     target_center=target_center,
+    #     target_radius=target_radius,
+    #     time_horizon=20.0,
+    #     n_time_steps=21, 
+    #     robot_radius=0.2,
+    #     wall_thickness=0.1
+    # )
+    # print("Done!")
+
+    time_horizon = 30.0
+
+    print("Computing BRT in subprocess...")
+    brt_data = BRT_subprocess.compute_brt_in_subprocess(
+        house_index=152,
+        target_center=target_center,
+        target_radius=target_radius,
+        time_horizon= time_horizon,
+        output_path="/tmp/brt_result.pkl"
+    )
+    print("BRT loaded!")
 
 
-    # #pick up an alarm clock
-    # task = {'sample_id': 'task=ObjectNavType,house=13653,sub_house_id=127', 'house_id': '013653', 'task_type': 'FetchType', 'sub_house_id': 127, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
-    #         'observations': {'goal': 'locate an alarm clock and pick up that alarm clock', 'initial_agent_location': np.array([ 4.19999981,  0.90099216,  5. ,0. , 90. ,0.]), 'actions': [], 'time_ids': [], 
-    #         'templated_task_type': '{"task_type": "FetchType", "house_index": 13653, "agent_starting_position": [4.199999809265137, 0.9009921550750732, 5.0], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"alarm_clock.n.01": ["AlarmClock|4|5"]}, "synset_to_object_ids": {"alarm_clock.n.01": ["AlarmClock|4|5"]}, "synsets": ["alarm_clock.n.01"], "extras": {"chosen_object_id": "AlarmClock|4|5"}, "natural_language_spec": "locate an alarm clock and pick up that alarm clock", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
 
-    # #go to a television
-    # task = {'sample_id': 'task=ObjectNavType,house=0,sub_house_id=127', 'house_id': '0', 'task_type': 'ObjectNavType', 'sub_house_id': 127, 'needs_video': True, 'raw_navigation_camera': '', 'sensors_path': '', 
-    #         'observations': {'goal': 'go to a television', 'initial_agent_location': np.array([ 3.25,  0.90099216,  5.75,0. , 90. ,0.]), 'actions': [], 'time_ids': [], 
-    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 0, "agent_starting_position": [3.25, 0.9009921550750732, 5.75], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"television_receiver.n.01": ["television|7|0|1", "television|7|0|0"]}, "synset_to_object_ids": {"television_receiver.n.01": ["television|7|0|1", "television|7|0|1"]}, "synsets": ["television_receiver.n.01"], "extras": {"chosen_object_id": "television|7|0|1"}, "natural_language_spec": "go to a television", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
-    
-    # #go to a pan
-    # task = {'sample_id': 'task=ObjectNavType,house=0,sub_house_id=127', 'house_id': '0', 'task_type': 'ObjectNavType', 'sub_house_id': 127, 'needs_video': False, 'raw_navigation_camera': '', 'sensors_path': '', 
-    #         'observations': {'goal': 'go to a pan', 'initial_agent_location': np.array([ 3.25,  0.90099216,  5.75,0. , 90. ,0.]), 'actions': [], 'time_ids': [], 
-    #         'templated_task_type': '{"task_type": "ObjectNavType", "house_index": 0, "agent_starting_position": [3.25, 0.9009921550750732, 5.75], "agent_y_rotation": 90.0, "expert_length_bucket": "short", "expert_length": 30, "broad_synset_to_object_ids": {"pan.n.01": ["Pan|6|34"]}, "synset_to_object_ids": {"pan.n.01": ["Pan|6|34"]}, "synsets": ["pan.n.01"], "extras": {"chosen_object_id": "Pan|6|34"}, "natural_language_spec": "go to a pan", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4", "hypernyms": ["instrument.n.01"], "freqs": [15]}'}}
+    num_trials = 1                # number of GOOD episodes you want
+    good_episodes = 0               # counts only non-mismatch episodes
+    attempts = 0                    # counts all runs (including mismatches)
 
-    #go to a kitchen
-    # task = {'sample_id': 'task=RoomNav,house=6090,sub_house_id=127', 'house_id': '006090', 'task_type': 'RoomNav', 'sub_house_id': 127, 'needs_video': True, 'raw_navigation_camera': '', 
-    #         'sensors_path': '', 'observations': {'goal': 'go to a kitchen', 'initial_agent_location': np.array([3.05000019,  0.90099216, 5.75, 0., 60.00000381, 0.]), 'actions': [], 'time_ids': [], 'templated_task_type': '{"task_type": "RoomNav", "house_index": 6090, "agent_starting_position": [10.050000190734863, 0.9009921550750732, 11.75], "agent_y_rotation": 60.000003814697266, "expert_length_bucket": "short", "expert_length": 17, "room_types": ["Kitchen"], "room_ids": {"Kitchen": ["room|8"]}, "extras": {"chosen_room_id": "room|8"}, "natural_language_spec": "go to a kitchen", "task_path": "/net/nfs.cirrascale/prior/datasets/vida_datasets/benchmark_Oct22_closed_type/RoomNav/val/006090/raw_navigation_camera__0.mp4", "freqs": [51]}'}}
-
-
-    num_trials = 50
-    num_success = 0
+    num_success_main = 0
     total_eps_len = 0
-    num_target_reached = 0
+    num_success_stl = 0
+    num_mismatch = 0
 
     starting_time = time.time()
-    for _ in range(num_trials):
-        target_reached = False
+
+    while good_episodes < num_trials:
+        attempts += 1
+        stl_task_done = False  # (make sure you actually set this from results if it's in metrics)
+
         tasks_queue = mp.Queue()
         results_queue = mp.Queue()
 
-        print("Trial:", _+1)
+        print(f"Attempt: {attempts} | Good episodes so far: {good_episodes}/{num_trials}")
+
         tasks_queue.put(task)
 
         start_worker(
             worker,
             agent_class,
             agent_input,
-            device= 0,
+            device=0,
             tasks_queue=tasks_queue,
             results_queue=results_queue,
         )
 
         results = results_queue.get()[0]
-        success = results["metrics"]["success"]
-        eps_len = results["metrics"]["eps_len"]
-        
+        metrics = results["metrics"]
+
+
+        # --- skip mismatch episodes ---
+        if metrics.get("mismatch_episode", False):
+            num_mismatch += 1
+            print("⚠️  Mismatch episode detected -> discarding and rerunning.")
+            continue
+
+        # --- count this as a GOOD episode ---
+        good_episodes += 1
+
+        success = metrics["success"]
+        eps_len = metrics["eps_len"]
         total_eps_len += eps_len
 
-        if target_reached:
-            num_target_reached += 1
+        if stl_task_done:
+            num_success_stl += 1
 
-        if success == 1.00000001:
-            print("The agent successfully completed the task!")
-            num_success += 1
+        if success:
+            num_success_main += 1
+
+
+
+        # ---- Running success rates ----
+        main_rate = num_success_main / good_episodes
+        stl_rate  = num_success_stl  / good_episodes
+
+        print(
+            f"Progress: {good_episodes}/{num_trials} good episodes\n"
+            f"  Main task success: {num_success_main}/{good_episodes} "
+            f"({main_rate*100:.2f}%)\n"
+            f"  STL task success:  {num_success_stl}/{good_episodes} "
+            f"({stl_rate*100:.2f}%)"
+        )
+
 
     finish_time = time.time()
     elapsed_time = finish_time - starting_time
+    print("\n===== FINAL RESULTS =====")
+    print("Good episodes collected:", good_episodes)
+    print("Mismatch episodes discarded:", num_mismatch)
+    print("Total attempts:", attempts)
+    print("Number of successful main trials:", num_success_main)
+    print(f"Main task success rate over {num_trials} GOOD trials: {num_success_main/num_trials*100:.2f}%")
+    print(f"Average episode length over {num_trials} GOOD trials: {total_eps_len/num_trials}")
+    print("Total time elapsed:", elapsed_time, "seconds")
+    print("STL tasks completed in", num_success_stl, "out of", num_trials, "GOOD trials.")
 
-    print('Number of successful trials:', num_success)
-    print(f"Success rate over {num_trials} trials: {num_success/num_trials*100}%")
-    print(f"Average episode length over {num_trials} trials: {total_eps_len/num_trials}")
-    print('Total time elapsed:', elapsed_time, 'seconds')
-    print("Target reached in", num_target_reached, "out of", num_trials, "trials.")
-
-
-
-    # # Ensure the model can be loaded
-    # agent_class.build_agent(**agent_input, device="cuda")
-
-    # print("Agent built successfully, starting evaluation...")
-
-
-
-    # task = ObjectNavTask(task_info={'task_type': 'ObjectNavType', 'house_index': '13653', 'num_rooms': 4, 'agent_starting_position': {'x': 4.199999809265137, 'y': 0.9009921550750732, 'z': 5.0}, 'agent_y_rotation': 90.0, 'natural_language_spec': 'go to an alarm clock', 'eval_info': {'sample_id': 'task=ObjectNavType,house=13653,sub_house_id=127', 'needs_video': True, 'task_type': 'ObjectNavType', 'house_index': 13653, 'agent_starting_position': [4.199999809265137, 0.9009921550750732, 5.0], 'agent_y_rotation': 90.0, 'expert_length_bucket': 'short', 'expert_length': 30, 'broad_synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'synsets': ['alarm_clock.n.01'], 'extras': {'chosen_object_id': 'AlarmClock|4|5'}, 'natural_language_spec': 'go to an alarm clock', 'task_path': '/net/nfs.cirrascale/prior/datasets/vida_datasets/object_nav_v3_benchmark/ObjectNavType/val/013653/raw_navigation_camera__0.mp4', 'hypernyms': ['instrument.n.01'], 'freqs': [15]}, 'synsets': ['alarm_clock.n.01'], 'synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'broad_synset_to_object_ids': {'alarm_clock.n.01': ['AlarmClock|4|5']}, 'extras': {}, 'followed_path': [{'x': 4.199999809265137, 'y': 0.9009921550750732, 'z': 5.0}], 'agent_poses': [{'name': 'agent', 'position': {'x': 4.199999809265137, 'y': 0.9009921550750732, 'z': 5.0}, 'rotation': {'x': -0.0, 'y': 90.0, 'z': 0.0}, 'cameraHorizon': 25.200002670288086, 'isStanding': False, 'inHighFrictionArea': False, 'arm': {'joints': [{'name': 'stretch_robot_lift_jnt', 'position': {'x': 4.12999963760376, 'y': 0.4152766466140747, 'z': 5.135000228881836}, 'rootRelativePosition': {'x': 0.04607595503330231, 'y': 0.32747650146484375, 'z': -0.2787679135799408}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_1_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.8802900314331055}, 'rootRelativePosition': {'x': 0.0829993188381195, 'y': 0.32747650146484375, 'z': -0.024057626724243164}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_2_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.8672895431518555}, 'rootRelativePosition': {'x': 0.0829993188381195, 'y': 0.32747650146484375, 'z': -0.011057138442993164}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_3_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.8542890548706055}, 'rootRelativePosition': {'x': 0.08299930393695831, 'y': 0.32747650146484375, 'z': 0.001943349838256836}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_4_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.841289043426514}, 'rootRelativePosition': {'x': 0.08299930393695831, 'y': 0.32747650146484375, 'z': 0.01494339108467102}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_arm_5_jnt', 'position': {'x': 4.093076229095459, 'y': 0.4152766466140747, 'z': 4.829542636871338}, 'rootRelativePosition': {'x': 0.08299930393695831, 'y': 0.32747650146484375, 'z': 0.026689797639846802}, 'rotation': {'x': -0.0, 'y': 1.0, 'z': -0.0, 'w': 180.0}, 'rootRelativeRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_wrist_1_jnt', 'position': {'x': 4.1761474609375, 'y': 0.4017653465270996, 'z': 4.856293201446533}, 'rootRelativePosition': {'x': -7.193908095359802e-05, 'y': 0.31396520137786865, 'z': -6.085634231567383e-05}, 'rotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'rootRelativeRotation': {'x': 0.0, 'y': 1.0, 'z': 0.0, 'w': 180.0}, 'localRotation': {'x': 0.0, 'y': 1.0, 'z': 0.0, 'w': 180.0}, 'armBaseHeight': None, 'elbowOrientation': None}, {'name': 'stretch_robot_wrist_2_jnt', 'position': {'x': 4.1761474609375, 'y': 0.35102641582489014, 'z': 4.856293201446533}, 'rootRelativePosition': {'x': -7.193908095359802e-05, 'y': 0.2632262706756592, 'z': -6.085634231567383e-05}, 'rotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'rootRelativeRotation': {'x': 0.0, 'y': 1.0, 'z': 0.0, 'w': 180.0}, 'localRotation': {'x': 1.0, 'y': 0.0, 'z': 0.0, 'w': 0.0}, 'armBaseHeight': None, 'elbowOrientation': None}], 'heldObjects': [], 'pickupableObjects': [], 'touchedNotHeldObjects': [], 'handSphereCenter': {'x': 4.1761474609375, 'y': 0.25239962339401245, 'z': 5.060993194580078}, 'handSphereRadius': 0.05999999865889549}}], 'taken_actions': [], 'action_successes': [], 'id': 'ObjectNavType_13653_1763743654_gotoanalarmclock'})
-
-    # houses = load_objaverse_houses()
-    # print(houses)
-    # gpu_device = gpu_devices[0]
-    # worker_id = 0
-    # worker_args = {'gpu_device': 0, 'houses': houses, 'max_eps_len': -1, 'input_sensors': ['raw_navigation_camera', 'raw_manipulation_camera', 'last_actions', 'an_object_is_in_hand', 'nav_task_relevant_object_bbox', 'manip_task_relevant_object_bbox', 'nav_accurate_object_bbox', 'manip_accurate_object_bbox'],
-    #       'skip_done': False, 'logging_sensor': <utils.visualization_utils.VideoLogging object at 0x74e9447740a0>,
-    #       'outdir': 'tmp_log/OnlineEval-revision-chores-small-training_run_id=SigLIP-ViTb-3-double-det-CHORES-S-eval_dataset=-eval_subset=minival-shuffle=True-sampling=sample/11_21_2025_12_20_06_233293', 'worker_id': 0, 'det_type': 'gt'}
-
-
-    #evaluate_on_task                                                                                                                                                                                       
